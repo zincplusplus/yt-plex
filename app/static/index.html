@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YT-Plex</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0f0f0f;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #262626;
+            --text-primary: #ffffff;
+            --text-secondary: #aaaaaa;
+            --accent: #ff0000;
+            --accent-hover: #cc0000;
+            --success: #2ecc71;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --border: #333333;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: var(--bg-secondary);
+            padding: 15px 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 30px;
+        }
+
+        header .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        nav {
+            display: flex;
+            gap: 20px;
+        }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        nav a:hover, nav a.active {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .card h2 {
+            margin-bottom: 15px;
+            font-size: 18px;
+            color: var(--text-primary);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-box {
+            background: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .stat-box .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .stat-box .label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: normal;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .status-pending { background: var(--warning); color: #000; }
+        .status-downloading { background: var(--accent); color: #fff; }
+        .status-completed { background: var(--success); color: #fff; }
+        .status-failed { background: var(--danger); color: #fff; }
+
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+        .badge-scan_start, .badge-scan_done { background: #9b59b6; color: #fff; }
+        .badge-channel_add { background: #1abc9c; color: #fff; }
+        .badge-queued { background: var(--warning); color: #000; }
+        .badge-downloading { background: #3498db; color: #fff; }
+        .badge-downloaded { background: var(--success); color: #fff; }
+        .badge-failed { background: var(--danger); color: #fff; }
+        .badge-cleanup { background: #7f8c8d; color: #fff; }
+
+        .log-entry { padding: 15px; background: var(--bg-tertiary); border-radius: 6px; margin-bottom: 10px; }
+        .log-entry .log-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+        .log-entry .log-time { color: var(--text-secondary); font-size: 12px; }
+        .log-entry .log-title { font-weight: 600; }
+        .log-entry .log-detail { color: var(--text-secondary); font-size: 13px; line-height: 1.5; margin-top: 6px; }
+        .log-entry .log-detail .detail-line { margin: 2px 0; }
+        .log-entry .log-detail .error-text { color: var(--danger); }
+        .log-entry .log-detail .filter-label { color: #9b59b6; font-weight: 500; }
+        .log-entry .log-detail .muted { color: #666; }
+
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--bg-tertiary);
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle input:checked + .toggle-slider {
+            background-color: var(--success);
+        }
+
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-secondary);
+            padding: 30px;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .truncate {
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .quick-add {
+            display: flex;
+            gap: 10px;
+        }
+
+        .quick-add input {
+            flex: 1;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+        }
+
+        .checkbox-group input {
+            width: auto;
+        }
+
+        .alert {
+            padding: 12px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .alert-success {
+            background: rgba(46, 204, 113, 0.2);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .alert-error {
+            background: rgba(231, 76, 60, 0.2);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+
+        .hidden { display: none !important; }
+
+        @media (max-width: 768px) {
+            nav { flex-wrap: wrap; gap: 10px; }
+            .form-row { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body x-data="app()">
+    <header>
+        <div class="container">
+            <a href="#" class="logo" @click.prevent="page = 'dashboard'" style="text-decoration: none; color: var(--accent);"><img src="/static/logo.png" alt="YT-Plex" style="height: 32px; vertical-align: middle; margin-right: 8px;">YT-Plex</a>
+            <nav>
+                <a href="#" :class="{ active: page === 'dashboard' }" @click.prevent="page = 'dashboard'">Dashboard</a>
+                <a href="#" :class="{ active: page === 'channels' }" @click.prevent="page = 'channels'">Channels</a>
+                <a href="#" :class="{ active: page === 'queue' }" @click.prevent="page = 'queue'">Queue</a>
+                <a href="#" :class="{ active: page === 'log' }" @click.prevent="page = 'log'">Log</a>
+                <a href="#" :class="{ active: page === 'settings' }" @click.prevent="page = 'settings'">Settings</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Alert -->
+        <div x-show="alert.show" x-transition :class="'alert alert-' + alert.type" x-text="alert.message"></div>
+
+        <!-- Dashboard -->
+        <div x-show="page === 'dashboard'">
+            <div class="card">
+                <h2>Quick Download</h2>
+                <div class="quick-add">
+                    <input type="text" x-model="quickUrl" placeholder="Paste YouTube video URL..." @keyup.enter="addManualDownload">
+                    <button class="btn btn-primary" @click="addManualDownload" :disabled="loading">Add to Queue</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="value" x-text="stats.enabled_channels || 0"></div>
+                        <div class="label">Active Channels</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="value" x-text="stats.completed_videos || 0"></div>
+                        <div class="label">Videos Downloaded</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="value" x-text="stats.pending_videos || 0"></div>
+                        <div class="label">In Queue</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="value" x-text="(stats.disk_usage_gb || 0) + ' GB'"></div>
+                        <div class="label">Disk Usage</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Recent Downloads</h2>
+                <table x-show="recentVideos.length">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Channel</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="video in recentVideos.slice(0, 10)" :key="video.video_id">
+                            <tr>
+                                <td class="truncate" x-text="video.title"></td>
+                                <td x-text="video.channel_name || 'Manual'"></td>
+                                <td><span :class="'status status-' + video.status" x-text="video.status"></span></td>
+                                <td x-text="formatDate(video.downloaded_at || video.created_at)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <p x-show="!recentVideos.length" style="color: var(--text-secondary)">No downloads yet</p>
+            </div>
+        </div>
+
+        <!-- Channels -->
+        <div x-show="page === 'channels'">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Channels</h2>
+                    <button class="btn btn-primary" @click="openChannelModal()">Add Channel</button>
+                </div>
+
+                <table x-show="channels.length">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Enabled</th>
+                            <th>Last Scanned</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="channel in channels" :key="channel.id">
+                            <tr>
+                                <td x-text="channel.name"></td>
+                                <td>
+                                    <label class="toggle">
+                                        <input type="checkbox" :checked="channel.enabled" @change="toggleChannel(channel)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </td>
+                                <td x-text="channel.last_scanned_at ? formatDate(channel.last_scanned_at) : 'Never'"></td>
+                                <td class="actions">
+                                    <button class="btn btn-secondary btn-sm" @click="scanChannel(channel.id)">Scan</button>
+                                    <button class="btn btn-secondary btn-sm" @click="openChannelModal(channel)">Edit</button>
+                                    <button class="btn btn-danger btn-sm" @click="deleteChannel(channel.id)">Delete</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <p x-show="!channels.length" style="color: var(--text-secondary)">No channels added yet</p>
+            </div>
+        </div>
+
+        <!-- Queue -->
+        <div x-show="page === 'queue'">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Download Queue</h2>
+                    <div class="actions">
+                        <button class="btn btn-secondary" @click="loadQueue">Refresh</button>
+                        <button class="btn btn-primary" @click="processQueue">Process Now</button>
+                    </div>
+                </div>
+
+                <div x-show="queue.downloading.length" style="margin-bottom: 20px;">
+                    <h3 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 10px;">Currently Downloading</h3>
+                    <template x-for="video in queue.downloading" :key="video.video_id">
+                        <div style="padding: 10px; background: var(--bg-tertiary); border-radius: 4px; margin-bottom: 5px;">
+                            <span x-text="video.title"></span>
+                            <span class="status status-downloading">downloading</span>
+                        </div>
+                    </template>
+                </div>
+
+                <h3 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 10px;">Pending (<span x-text="queue.pending.length"></span>)</h3>
+                <table x-show="queue.pending.length">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Channel</th>
+                            <th>Added</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="video in queue.pending" :key="video.video_id">
+                            <tr>
+                                <td class="truncate" x-text="video.title"></td>
+                                <td x-text="video.channel_name || 'Manual'"></td>
+                                <td x-text="formatDate(video.created_at)"></td>
+                                <td>
+                                    <button class="btn btn-danger btn-sm" @click="cancelDownload(video.video_id)">Cancel</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <p x-show="!queue.pending.length" style="color: var(--text-secondary)">Queue is empty</p>
+
+                <div style="margin-top: 30px;">
+                    <h3 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 10px;">Failed Downloads</h3>
+                    <table x-show="failedVideos.length">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Error</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="video in failedVideos" :key="video.video_id">
+                                <tr>
+                                    <td class="truncate" x-text="video.title"></td>
+                                    <td class="truncate" x-text="video.error_message || 'Unknown error'"></td>
+                                    <td>
+                                        <button class="btn btn-secondary btn-sm" @click="retryDownload(video.video_id)">Retry</button>
+                                        <button class="btn btn-danger btn-sm" @click="cancelDownload(video.video_id)">Remove</button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <p x-show="!failedVideos.length" style="color: var(--text-secondary)">No failed downloads</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log -->
+        <div x-show="page === 'log'">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Activity Log</h2>
+                    <button class="btn btn-danger btn-sm" @click="clearLog()">Clear Log</button>
+                </div>
+
+                <template x-for="entry in logEntries" :key="entry.id">
+                    <div class="log-entry">
+                        <div class="log-header">
+                            <span class="log-time" x-text="formatDate(entry.created_at)"></span>
+                            <span class="badge" :class="'badge-' + entry.event_type" x-text="formatEventType(entry.event_type)"></span>
+                            <span class="log-title" x-text="entry.title"></span>
+                        </div>
+                        <div class="log-detail" x-show="entry.detail">
+                            <!-- scan_start -->
+                            <template x-if="entry.event_type === 'scan_start'">
+                                <div>
+                                    <div class="detail-line" x-text="'URL: ' + parseDetail(entry.detail).url"></div>
+                                    <div class="detail-line" x-text="'Fetch limit: ' + parseDetail(entry.detail).fetch_limit"></div>
+                                    <template x-if="Object.keys(parseDetail(entry.detail).filters || {}).length > 0">
+                                        <div>
+                                            <div class="detail-line filter-label">Looking for:</div>
+                                            <template x-if="parseDetail(entry.detail).filters.title_filter">
+                                                <div class="detail-line" x-text="'  Title regex: ' + parseDetail(entry.detail).filters.title_filter"></div>
+                                            </template>
+                                            <template x-if="parseDetail(entry.detail).filters.description_filter">
+                                                <div class="detail-line" x-text="'  Description must contain: ' + parseDetail(entry.detail).filters.description_filter"></div>
+                                            </template>
+                                            <template x-if="parseDetail(entry.detail).filters.description_exclude">
+                                                <div class="detail-line" x-text="'  Description must NOT contain: ' + parseDetail(entry.detail).filters.description_exclude"></div>
+                                            </template>
+                                            <template x-if="parseDetail(entry.detail).filters.download_since">
+                                                <div class="detail-line" x-text="'  Videos since: ' + parseDetail(entry.detail).filters.download_since"></div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <!-- scan_done -->
+                            <template x-if="entry.event_type === 'scan_done'">
+                                <div>
+                                    <div class="detail-line" x-text="'Total found: ' + parseDetail(entry.detail).total_found + ' | New queued: ' + (parseDetail(entry.detail).queued_videos || []).length + ' | Filtered out: ' + (parseDetail(entry.detail).filtered_out || []).length + ' | Already tracked: ' + parseDetail(entry.detail).already_tracked + ' | Too old: ' + parseDetail(entry.detail).too_old"></div>
+                                    <template x-if="(parseDetail(entry.detail).queued_videos || []).length > 0">
+                                        <div>
+                                            <div class="detail-line" style="margin-top: 4px; color: var(--success);">Queued:</div>
+                                            <template x-for="v in parseDetail(entry.detail).queued_videos.slice(0, 5)">
+                                                <div class="detail-line" x-text="'  + ' + v.title"></div>
+                                            </template>
+                                            <template x-if="parseDetail(entry.detail).queued_videos.length > 5">
+                                                <div class="detail-line muted" x-text="'  ...and ' + (parseDetail(entry.detail).queued_videos.length - 5) + ' more'"></div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="(parseDetail(entry.detail).filtered_out || []).length > 0">
+                                        <div>
+                                            <div class="detail-line" style="margin-top: 4px; color: var(--warning);">Filtered out:</div>
+                                            <template x-for="v in parseDetail(entry.detail).filtered_out.slice(0, 3)">
+                                                <div class="detail-line" x-text="'  - ' + v.title + ' (' + v.reason + ')'"></div>
+                                            </template>
+                                            <template x-if="parseDetail(entry.detail).filtered_out.length > 3">
+                                                <div class="detail-line muted" x-text="'  ...and ' + (parseDetail(entry.detail).filtered_out.length - 3) + ' more'"></div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <!-- channel_add -->
+                            <template x-if="entry.event_type === 'channel_add'">
+                                <div>
+                                    <div class="detail-line" x-text="'URL: ' + parseDetail(entry.detail).url"></div>
+                                    <template x-if="parseDetail(entry.detail).format">
+                                        <div class="detail-line" x-text="'Format: ' + parseDetail(entry.detail).format"></div>
+                                    </template>
+                                    <template x-if="Object.keys(parseDetail(entry.detail).filters || {}).length > 0">
+                                        <div class="detail-line" x-text="'Filters: ' + JSON.stringify(parseDetail(entry.detail).filters)"></div>
+                                    </template>
+                                    <div class="detail-line" x-text="'Initial scan: ' + parseDetail(entry.detail).videos_queued + ' videos queued'"></div>
+                                </div>
+                            </template>
+                            <!-- queued -->
+                            <template x-if="entry.event_type === 'queued'">
+                                <div>
+                                    <div class="detail-line" x-text="'Video ID: ' + parseDetail(entry.detail).video_id"></div>
+                                    <div class="detail-line" x-text="'Source: ' + parseDetail(entry.detail).source"></div>
+                                    <div class="detail-line" x-text="'URL: ' + parseDetail(entry.detail).url"></div>
+                                </div>
+                            </template>
+                            <!-- downloading -->
+                            <template x-if="entry.event_type === 'downloading'">
+                                <div>
+                                    <div class="detail-line" x-text="'Video ID: ' + parseDetail(entry.detail).video_id"></div>
+                                    <template x-if="parseDetail(entry.detail).channel_name">
+                                        <div class="detail-line" x-text="'Channel: ' + parseDetail(entry.detail).channel_name"></div>
+                                    </template>
+                                    <div class="detail-line" x-text="'Format: ' + parseDetail(entry.detail).format"></div>
+                                    <div class="detail-line" x-text="'Subtitles: ' + parseDetail(entry.detail).subtitle_langs"></div>
+                                </div>
+                            </template>
+                            <!-- downloaded -->
+                            <template x-if="entry.event_type === 'downloaded'">
+                                <div>
+                                    <div class="detail-line" x-text="'Video ID: ' + parseDetail(entry.detail).video_id"></div>
+                                    <template x-if="parseDetail(entry.detail).channel_name">
+                                        <div class="detail-line" x-text="'Channel: ' + parseDetail(entry.detail).channel_name"></div>
+                                    </template>
+                                    <div class="detail-line" x-text="'File: ' + parseDetail(entry.detail).file_path"></div>
+                                    <template x-if="parseDetail(entry.detail).file_size">
+                                        <div class="detail-line" x-text="'Size: ' + formatBytes(parseDetail(entry.detail).file_size)"></div>
+                                    </template>
+                                    <div class="detail-line" x-text="'Format: ' + parseDetail(entry.detail).format"></div>
+                                </div>
+                            </template>
+                            <!-- failed -->
+                            <template x-if="entry.event_type === 'failed'">
+                                <div>
+                                    <div class="detail-line" x-text="'Video ID: ' + parseDetail(entry.detail).video_id"></div>
+                                    <template x-if="parseDetail(entry.detail).channel_name">
+                                        <div class="detail-line" x-text="'Channel: ' + parseDetail(entry.detail).channel_name"></div>
+                                    </template>
+                                    <div class="detail-line error-text" x-text="'Error: ' + parseDetail(entry.detail).error"></div>
+                                </div>
+                            </template>
+                            <!-- cleanup -->
+                            <template x-if="entry.event_type === 'cleanup'">
+                                <div>
+                                    <div class="detail-line" x-text="'Deleted: ' + parseDetail(entry.detail).total_deleted + ' videos | Freed: ' + formatBytes(parseDetail(entry.detail).freed_bytes)"></div>
+                                    <template x-if="(parseDetail(entry.detail).deleted_videos || []).length > 0">
+                                        <div>
+                                            <template x-for="v in parseDetail(entry.detail).deleted_videos.slice(0, 5)">
+                                                <div class="detail-line" x-text="'  - ' + v.title + ' (age: ' + v.age_days + 'd / max: ' + v.max_days + 'd)'"></div>
+                                            </template>
+                                            <template x-if="parseDetail(entry.detail).deleted_videos.length > 5">
+                                                <div class="detail-line muted" x-text="'  ...and ' + (parseDetail(entry.detail).deleted_videos.length - 5) + ' more'"></div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <p x-show="!logEntries.length" style="color: var(--text-secondary)">No activity yet</p>
+            </div>
+        </div>
+
+        <!-- Settings -->
+        <div x-show="page === 'settings'">
+            <div class="card">
+                <h2>Global Settings</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Default Download Format</label>
+                        <select x-model="globalSettings.default_download_format">
+                            <option value="bestvideo[ext=mp4][height<=2160]+bestaudio[ext=m4a]/best[ext=mp4]/best">4K (2160p)</option>
+                            <option value="bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best">1080p</option>
+                            <option value="bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4]/best">720p</option>
+                            <option value="bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4]/best">480p</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Default Subtitle Language</label>
+                        <input type="text" x-model="globalSettings.default_subtitle_langs" placeholder="en">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Default SponsorBlock Categories</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" value="sponsor" :checked="globalSettings.default_sponsorblock_categories?.includes('sponsor')" @change="toggleSponsorblock('sponsor')"> Sponsor</label>
+                        <label><input type="checkbox" value="selfpromo" :checked="globalSettings.default_sponsorblock_categories?.includes('selfpromo')" @change="toggleSponsorblock('selfpromo')"> Self-Promo</label>
+                        <label><input type="checkbox" value="interaction" :checked="globalSettings.default_sponsorblock_categories?.includes('interaction')" @change="toggleSponsorblock('interaction')"> Interaction</label>
+                        <label><input type="checkbox" value="intro" :checked="globalSettings.default_sponsorblock_categories?.includes('intro')" @change="toggleSponsorblock('intro')"> Intro</label>
+                        <label><input type="checkbox" value="outro" :checked="globalSettings.default_sponsorblock_categories?.includes('outro')" @change="toggleSponsorblock('outro')"> Outro</label>
+                        <label><input type="checkbox" value="preview" :checked="globalSettings.default_sponsorblock_categories?.includes('preview')" @change="toggleSponsorblock('preview')"> Preview</label>
+                        <label><input type="checkbox" value="music_offtopic" :checked="globalSettings.default_sponsorblock_categories?.includes('music_offtopic')" @change="toggleSponsorblock('music_offtopic')"> Non-Music</label>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Default Scan Interval (hours)</label>
+                        <input type="number" x-model="globalSettings.default_scan_interval_hours" min="1" max="168">
+                    </div>
+                    <div class="form-group">
+                        <label>Delete Videos After (days, 0 = never)</label>
+                        <input type="number" x-model="globalSettings.default_delete_after_days" min="0">
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" @click="saveSettings" :disabled="loading">Save Settings</button>
+            </div>
+
+            <div class="card">
+                <h2>Actions</h2>
+                <div class="actions">
+                    <button class="btn btn-secondary" @click="scanAllChannels" :disabled="loading">Scan All Channels</button>
+                    <button class="btn btn-secondary" @click="runCleanup" :disabled="loading">Run Cleanup</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Channel Modal -->
+    <div class="modal" :class="{ active: showChannelModal }">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 x-text="editingChannel ? 'Edit Channel' : 'Add Channel'"></h2>
+                <button class="modal-close" @click="showChannelModal = false">&times;</button>
+            </div>
+
+            <div class="form-group">
+                <label>Channel URL</label>
+                <input type="text" x-model="channelForm.url" placeholder="https://www.youtube.com/@channelname" :disabled="editingChannel">
+            </div>
+
+            <div x-show="editingChannel" class="form-group">
+                <label>Name</label>
+                <input type="text" x-model="channelForm.name">
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" x-model="channelForm.enabled" style="width: auto; margin-right: 5px;">
+                    Enabled
+                </label>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Download Format</label>
+                    <select x-model="channelForm.download_format">
+                        <option value="">Use Default</option>
+                        <option value="bestvideo[ext=mp4][height<=2160]+bestaudio[ext=m4a]/best[ext=mp4]/best">4K (2160p)</option>
+                        <option value="bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best">1080p</option>
+                        <option value="bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4]/best">720p</option>
+                        <option value="bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4]/best">480p</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Scan Interval (hours)</label>
+                    <input type="number" x-model="channelForm.scan_interval_hours" min="1" max="168">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>SponsorBlock Categories</label>
+                <input type="text" x-model="channelForm.sponsorblock_remove" placeholder="sponsor,selfpromo,interaction">
+                <small style="color: var(--text-secondary)">Comma-separated: sponsor, selfpromo, interaction, intro, outro, preview, music_offtopic</small>
+            </div>
+
+            <div class="form-group">
+                <label>Subtitle Languages</label>
+                <input type="text" x-model="channelForm.subtitle_langs" placeholder="en">
+            </div>
+
+            <div class="form-group">
+                <label>Title Filter (regex, must match)</label>
+                <input type="text" x-model="channelForm.title_filter" placeholder="e.g., .*Monologue.*">
+            </div>
+
+            <div class="form-group">
+                <label>Description Must Contain (regex)</label>
+                <input type="text" x-model="channelForm.description_filter" placeholder="e.g., #Monologue">
+            </div>
+
+            <div class="form-group">
+                <label>Description Must NOT Contain (regex)</label>
+                <input type="text" x-model="channelForm.description_exclude" placeholder="e.g., #Short">
+            </div>
+
+            <div class="form-group">
+                <label>Download Videos Since (date)</label>
+                <input type="date" x-model="channelForm.download_since">
+                <small style="color: var(--text-secondary)">Only download videos uploaded after this date. Leave empty for new videos only.</small>
+            </div>
+
+            <div class="form-group">
+                <label>Delete After (days, empty = use global)</label>
+                <input type="number" x-model="channelForm.delete_after_days" min="0">
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-secondary" @click="showChannelModal = false">Cancel</button>
+                <button class="btn btn-primary" @click="saveChannel" :disabled="loading">
+                    <span x-text="editingChannel ? 'Save Changes' : 'Add Channel'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function app() {
+            return {
+                page: 'dashboard',
+                loading: false,
+                alert: { show: false, type: 'success', message: '' },
+
+                // Data
+                stats: {},
+                channels: [],
+                recentVideos: [],
+                queue: { pending: [], downloading: [] },
+                failedVideos: [],
+                logEntries: [],
+                globalSettings: {},
+
+                // Modal
+                showChannelModal: false,
+                editingChannel: null,
+                channelForm: {},
+                quickUrl: '',
+
+                async init() {
+                    await this.loadAll();
+                    // Auto-refresh every 30 seconds
+                    setInterval(() => this.loadAll(), 30000);
+                },
+
+                async loadAll() {
+                    await Promise.all([
+                        this.loadStats(),
+                        this.loadChannels(),
+                        this.loadRecentVideos(),
+                        this.loadQueue(),
+                        this.loadSettings(),
+                        this.loadLog()
+                    ]);
+                },
+
+                async loadStats() {
+                    try {
+                        const res = await fetch('/api/settings/stats');
+                        this.stats = await res.json();
+                    } catch (e) { console.error(e); }
+                },
+
+                async loadChannels() {
+                    try {
+                        const res = await fetch('/api/channels');
+                        const data = await res.json();
+                        this.channels = data.channels;
+                    } catch (e) { console.error(e); }
+                },
+
+                async loadRecentVideos() {
+                    try {
+                        const res = await fetch('/api/downloads?limit=20');
+                        const data = await res.json();
+                        this.recentVideos = data.videos;
+                    } catch (e) { console.error(e); }
+                },
+
+                async loadQueue() {
+                    try {
+                        const res = await fetch('/api/downloads/queue');
+                        this.queue = await res.json();
+
+                        const failedRes = await fetch('/api/downloads?status=failed');
+                        const failedData = await failedRes.json();
+                        this.failedVideos = failedData.videos;
+                    } catch (e) { console.error(e); }
+                },
+
+                async loadSettings() {
+                    try {
+                        const res = await fetch('/api/settings');
+                        this.globalSettings = await res.json();
+                    } catch (e) { console.error(e); }
+                },
+
+                async loadLog() {
+                    try {
+                        const res = await fetch('/api/logs');
+                        const data = await res.json();
+                        this.logEntries = data.entries;
+                    } catch (e) { console.error(e); }
+                },
+
+                async clearLog() {
+                    if (!confirm('Clear all activity log entries?')) return;
+                    try {
+                        await fetch('/api/logs', { method: 'DELETE' });
+                        this.logEntries = [];
+                        this.showAlert('success', 'Activity log cleared');
+                    } catch (e) {
+                        this.showAlert('error', 'Failed to clear log');
+                    }
+                },
+
+                parseDetail(detail) {
+                    if (!detail) return {};
+                    try { return JSON.parse(detail); } catch (e) { return {}; }
+                },
+
+                formatEventType(type) {
+                    const labels = {
+                        scan_start: 'Scan Start',
+                        scan_done: 'Scan Done',
+                        channel_add: 'Channel Add',
+                        queued: 'Queued',
+                        downloading: 'Downloading',
+                        downloaded: 'Downloaded',
+                        failed: 'Failed',
+                        cleanup: 'Cleanup'
+                    };
+                    return labels[type] || type;
+                },
+
+                formatBytes(bytes) {
+                    if (!bytes || bytes === 0) return '0 B';
+                    const sizes = ['B', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+                    return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 2 : 0) + ' ' + sizes[i];
+                },
+
+                showAlert(type, message) {
+                    this.alert = { show: true, type, message };
+                    setTimeout(() => { this.alert.show = false; }, 5000);
+                },
+
+                formatDate(dateStr) {
+                    if (!dateStr) return '';
+                    const date = new Date(dateStr);
+                    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                },
+
+                // Channels
+                openChannelModal(channel = null) {
+                    this.editingChannel = channel;
+                    this.channelForm = channel ? { ...channel } : {
+                        url: '',
+                        enabled: true,
+                        scan_interval_hours: 6,
+                        download_format: '',
+                        sponsorblock_remove: 'sponsor,selfpromo,interaction',
+                        subtitle_langs: 'en',
+                        title_filter: '',
+                        description_filter: '',
+                        description_exclude: '',
+                        download_since: '',
+                        delete_after_days: null
+                    };
+                    this.showChannelModal = true;
+                },
+
+                async saveChannel() {
+                    this.loading = true;
+                    try {
+                        const url = this.editingChannel
+                            ? `/api/channels/${this.editingChannel.id}`
+                            : '/api/channels';
+                        const method = this.editingChannel ? 'PUT' : 'POST';
+
+                        const res = await fetch(url, {
+                            method,
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.channelForm)
+                        });
+
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || 'Failed to save channel');
+
+                        this.showAlert('success', this.editingChannel ? 'Channel updated!' : data.message);
+                        this.showChannelModal = false;
+                        await this.loadAll();
+                    } catch (e) {
+                        this.showAlert('error', e.message);
+                    }
+                    this.loading = false;
+                },
+
+                async toggleChannel(channel) {
+                    await fetch(`/api/channels/${channel.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: !channel.enabled })
+                    });
+                    await this.loadChannels();
+                },
+
+                async deleteChannel(id) {
+                    if (!confirm('Delete this channel and all its videos?')) return;
+                    await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+                    this.showAlert('success', 'Channel deleted');
+                    await this.loadChannels();
+                },
+
+                async scanChannel(id) {
+                    this.loading = true;
+                    try {
+                        const res = await fetch(`/api/channels/${id}/scan`, { method: 'POST' });
+                        const data = await res.json();
+                        this.showAlert('success', data.message);
+                        await this.loadQueue();
+                    } catch (e) {
+                        this.showAlert('error', 'Scan failed');
+                    }
+                    this.loading = false;
+                },
+
+                // Downloads
+                async addManualDownload() {
+                    if (!this.quickUrl) return;
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/downloads/manual', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: this.quickUrl })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail);
+                        this.showAlert('success', data.message);
+                        this.quickUrl = '';
+                        await this.loadAll();
+                    } catch (e) {
+                        this.showAlert('error', e.message);
+                    }
+                    this.loading = false;
+                },
+
+                async cancelDownload(videoId) {
+                    await fetch(`/api/downloads/${videoId}/cancel`, { method: 'POST' });
+                    await this.loadQueue();
+                },
+
+                async retryDownload(videoId) {
+                    await fetch(`/api/downloads/${videoId}/retry`, { method: 'POST' });
+                    this.showAlert('success', 'Download queued for retry');
+                    await this.loadQueue();
+                },
+
+                async processQueue() {
+                    await fetch('/api/downloads/process', { method: 'POST' });
+                    this.showAlert('success', 'Queue processing triggered');
+                    setTimeout(() => this.loadQueue(), 2000);
+                },
+
+                // Settings
+                toggleSponsorblock(category) {
+                    let cats = (this.globalSettings.default_sponsorblock_categories || '').split(',').filter(c => c);
+                    if (cats.includes(category)) {
+                        cats = cats.filter(c => c !== category);
+                    } else {
+                        cats.push(category);
+                    }
+                    this.globalSettings.default_sponsorblock_categories = cats.join(',');
+                },
+
+                async saveSettings() {
+                    this.loading = true;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.globalSettings)
+                        });
+                        this.showAlert('success', 'Settings saved!');
+                    } catch (e) {
+                        this.showAlert('error', 'Failed to save settings');
+                    }
+                    this.loading = false;
+                },
+
+                async scanAllChannels() {
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/settings/scan-all', { method: 'POST' });
+                        const data = await res.json();
+                        this.showAlert('success', data.message);
+                        await this.loadQueue();
+                    } catch (e) {
+                        this.showAlert('error', 'Scan failed');
+                    }
+                    this.loading = false;
+                },
+
+                async runCleanup() {
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/settings/cleanup', { method: 'POST' });
+                        const data = await res.json();
+                        this.showAlert('success', data.message);
+                        await this.loadStats();
+                    } catch (e) {
+                        this.showAlert('error', 'Cleanup failed');
+                    }
+                    this.loading = false;
+                }
+            };
+        }
+    </script>
+</body>
+</html>

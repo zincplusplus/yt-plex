@@ -1,0 +1,41 @@
+name: yt-plex
+services:
+  yt-plex:
+    container_name: yt-plex
+    build: .
+    # Or use pre-built image:
+    # image: yt-plex:latest
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ${DATA_DIR:-/DATA/AppData/yt-plex}:/app/data
+      - ${DOWNLOADS_DIR:-/mnt/plex1/YouTube}:/app/downloads
+
+x-casaos:
+  author: self
+  category: Media
+  description:
+    en_us: YouTube downloader with per-channel settings, SponsorBlock integration, and auto-cleanup. Perfect for Plex integration.
+  developer: ""
+  icon: http://${HOST_IP:-localhost}:${APP_PORT:-8080}/static/logo.png
+  index: /
+  main: yt-plex
+  port_map: "${APP_PORT:-8080}"
+  scheme: http
+  store_app_id: yt-plex
+  tagline:
+    en_us: YouTube Downloader for Plex
+  thumbnail: ""
+  tips:
+    before_install:
+      en_us: |
+        Volumes:
+        - Data directory: Configuration and database
+        - Downloads directory: Downloaded videos (point to your Plex library)
+  title:
+    en_us: YT-Plex
