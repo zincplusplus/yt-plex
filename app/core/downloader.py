@@ -1,10 +1,13 @@
 import json
 import os
+import subprocess
 import yt_dlp
 import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 import logging
 import re
 
@@ -185,6 +188,194 @@ def download_video(
             }
 
 
+def check_sponsorblock_api(video_id: str) -> bool:
+    """Check if SponsorBlock has any segments for this video."""
+    try:
+        url = f"https://sponsor.ajay.app/api/skipSegments?videoID={video_id}"
+        req = Request(url, headers={"User-Agent": "yt-plex/1.0"})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return len(data) > 0
+    except (HTTPError, URLError, json.JSONDecodeError):
+        return False
+    except Exception:
+        return False
+
+
+def find_sponsors_with_gemini(vtt_content: str, api_key: str) -> list[dict]:
+    """Use Gemini AI to identify sponsor segments from subtitles."""
+    import google.generativeai as genai
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.0-flash')
+
+    prompt = """You are analyzing YouTube video subtitles to find sponsor/ad segments.
+
+Identify all sponsored ad reads — segments where the host is promoting a product or service.
+
+Include the full segment from when they transition INTO the ad read to when they return to regular content. Err on the side of starting a few seconds early rather than late.
+
+Return JSON only, no other text:
+[{"sponsor": "Brand Name", "start_seconds": 123.4, "end_seconds": 189.2}]
+
+If no sponsors found, return: []
+
+Subtitles:
+""" + vtt_content
+
+    response = model.generate_content(prompt)
+    # Strip markdown code fences if present
+    text = response.text.strip()
+    if text.startswith("```"):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    return json.loads(text)
+
+
+def cut_segments(video_path: str, segments: list[dict]) -> bool:
+    """Use ffmpeg to cut sponsor segments from the video."""
+    if not segments:
+        return False
+
+    video = Path(video_path)
+    if not video.exists():
+        logger.error(f"Video file not found: {video_path}")
+        return False
+
+    # Get video duration using ffprobe
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', str(video)],
+            capture_output=True, text=True, timeout=30
+        )
+        duration = float(result.stdout.strip())
+    except Exception as e:
+        logger.error(f"Failed to get video duration: {e}")
+        return False
+
+    # Sort segments by start time
+    segments = sorted(segments, key=lambda s: s['start_seconds'])
+
+    # Build list of keep-segments (everything NOT in a sponsor segment)
+    keep_parts = []
+    current_pos = 0.0
+    for seg in segments:
+        start = seg['start_seconds']
+        end = seg['end_seconds']
+        if start > current_pos:
+            keep_parts.append((current_pos, start))
+        current_pos = max(current_pos, end)
+    if current_pos < duration:
+        keep_parts.append((current_pos, duration))
+
+    if not keep_parts:
+        logger.warning("No content would remain after cutting — skipping")
+        return False
+
+    # Build ffmpeg filter_complex for segment selection
+    temp_path = video.with_suffix('.tmp.mp4')
+    filter_parts = []
+    concat_inputs = []
+    for i, (start, end) in enumerate(keep_parts):
+        filter_parts.append(
+            f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{i}];"
+            f"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[a{i}]"
+        )
+        concat_inputs.append(f"[v{i}][a{i}]")
+
+    filter_complex = ";".join(filter_parts)
+    filter_complex += f";{''.join(concat_inputs)}concat=n={len(keep_parts)}:v=1:a=1[outv][outa]"
+
+    cmd = [
+        'ffmpeg', '-y', '-i', str(video),
+        '-filter_complex', filter_complex,
+        '-map', '[outv]', '-map', '[outa]',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+        '-c:a', 'aac', '-b:a', '192k',
+        str(temp_path)
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            logger.error(f"ffmpeg failed: {result.stderr[-500:]}")
+            temp_path.unlink(missing_ok=True)
+            return False
+
+        # Replace original with cut version
+        temp_path.replace(video)
+        logger.info(f"Successfully cut {len(segments)} sponsor segment(s) from {video.name}")
+        return True
+
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg timed out")
+        temp_path.unlink(missing_ok=True)
+        return False
+    except Exception as e:
+        logger.error(f"ffmpeg error: {e}")
+        temp_path.unlink(missing_ok=True)
+        return False
+
+
+def gemini_sponsorblock_fallback(video_id: str, video_path: str) -> None:
+    """Check SponsorBlock API first; if no data, use Gemini AI to find and cut sponsors."""
+    api_key = settings.gemini_api_key
+    if not api_key:
+        logger.warning("Gemini API key not configured, skipping AI sponsorblock fallback")
+        return
+
+    # Check if SponsorBlock already has data for this video
+    if check_sponsorblock_api(video_id):
+        logger.info(f"SponsorBlock has data for {video_id}, skipping Gemini fallback")
+        return
+
+    logger.info(f"No SponsorBlock data for {video_id}, using Gemini AI fallback")
+
+    # Find the VTT subtitle file
+    # yt-dlp writes subtitles as "Title [id].en.vtt" alongside "Title [id].mp4"
+    video = Path(video_path)
+    stem = video.stem  # e.g. "Title [id]"
+    vtt_path = None
+    # Check common patterns: stem.en.vtt, stem.vtt, stem.*.vtt
+    for candidate in [
+        video.parent / f"{stem}.en.vtt",
+        video.parent / f"{stem}.vtt",
+    ]:
+        if candidate.exists():
+            vtt_path = candidate
+            break
+    if not vtt_path:
+        for f in video.parent.glob(f"{stem}.*.vtt"):
+            vtt_path = f
+            break
+
+    if not vtt_path:
+        logger.warning(f"No VTT subtitle file found for {video_path}, skipping Gemini fallback")
+        return
+
+    try:
+        vtt_content = vtt_path.read_text(encoding='utf-8')
+    except Exception as e:
+        logger.error(f"Failed to read VTT file: {e}")
+        return
+
+    try:
+        segments = find_sponsors_with_gemini(vtt_content, api_key)
+    except Exception as e:
+        logger.error(f"Gemini AI sponsor detection failed: {e}")
+        return
+
+    if not segments:
+        logger.info(f"Gemini found no sponsor segments in {video_id}")
+        return
+
+    sponsor_names = [s.get('sponsor', 'Unknown') for s in segments]
+    logger.info(f"Gemini found {len(segments)} sponsor segment(s) in {video_id}: {', '.join(sponsor_names)}")
+
+    cut_segments(video_path, segments)
+
+
 async def process_download_queue():
     """Process pending downloads from the queue."""
     pending = await db.get_videos_by_status('pending', limit=1)
@@ -229,6 +420,23 @@ async def process_download_queue():
     )
 
     if result['success']:
+        # Check if Gemini SponsorBlock fallback is enabled for this channel
+        use_gemini = None
+        if channel:
+            use_gemini = channel.get('use_gemini_sponsorblock')  # NULL, 0, or 1
+        if use_gemini is None:
+            # Fall back to global setting
+            global_setting = await db.get_setting('use_gemini_sponsorblock', 'false')
+            use_gemini = global_setting == 'true'
+        else:
+            use_gemini = bool(use_gemini)
+
+        if use_gemini and result.get('file_path'):
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: gemini_sponsorblock_fallback(video_id, result['file_path'])
+            )
+
         await db.update_video(
             video_id,
             status='completed',

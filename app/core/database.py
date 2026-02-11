@@ -70,6 +70,13 @@ async def init_db():
         """)
         await db.commit()
 
+        # Migrations: add columns to existing tables
+        try:
+            await db.execute("ALTER TABLE channels ADD COLUMN use_gemini_sponsorblock INTEGER DEFAULT NULL")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
+
 
 # Channel operations
 async def create_channel(name: str, url: str, channel_id: str, **kwargs) -> int:

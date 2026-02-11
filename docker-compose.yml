@@ -12,6 +12,7 @@ services:
       - TZ=${TZ:-America/New_York}
       - PUID=1000
       - PGID=1000
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
       - ${DATA_DIR:-/DATA/AppData/yt-plex}:/app/data
       - ${DOWNLOADS_DIR:-/mnt/plex1/YouTube}:/app/downloads

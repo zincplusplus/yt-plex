@@ -16,6 +16,7 @@ class GlobalSettings(BaseModel):
     default_subtitle_langs: Optional[str] = None
     default_scan_interval_hours: Optional[int] = None
     default_delete_after_days: Optional[int] = None
+    use_gemini_sponsorblock: Optional[bool] = None
 
 
 @router.get("")
@@ -44,6 +45,9 @@ async def get_settings():
             "default_delete_after_days",
             settings.default_delete_after_days
         )),
+        "use_gemini_sponsorblock": db_settings.get(
+            "use_gemini_sponsorblock", "false"
+        ) == "true",
     }
 
 
@@ -54,7 +58,10 @@ async def update_settings(update: GlobalSettings):
 
     for key, value in update_data.items():
         if value is not None:
-            await db.set_setting(key, str(value))
+            if isinstance(value, bool):
+                await db.set_setting(key, "true" if value else "false")
+            else:
+                await db.set_setting(key, str(value))
 
     return {"message": "Settings updated successfully"}
 

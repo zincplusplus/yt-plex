@@ -763,6 +763,14 @@
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" x-model="globalSettings.use_gemini_sponsorblock" style="width: auto; margin-right: 5px;">
+                        Use Gemini AI as SponsorBlock fallback
+                    </label>
+                    <small style="color: var(--text-secondary); display: block; margin-top: 4px;">When SponsorBlock has no data, use Gemini AI to detect and remove sponsor segments. Requires GEMINI_API_KEY in .env</small>
+                </div>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label>Default Scan Interval (hours)</label>
@@ -838,6 +846,16 @@
             <div class="form-group">
                 <label>Subtitle Languages</label>
                 <input type="text" x-model="channelForm.subtitle_langs" placeholder="en">
+            </div>
+
+            <div class="form-group">
+                <label>Gemini SponsorBlock Fallback</label>
+                <select x-model="channelForm.use_gemini_sponsorblock">
+                    <option :value="null">Use global setting</option>
+                    <option :value="true">On</option>
+                    <option :value="false">Off</option>
+                </select>
+                <small style="color: var(--text-secondary)">Override global Gemini AI fallback setting for this channel</small>
             </div>
 
             <div class="form-group">
@@ -1014,7 +1032,7 @@
                 // Channels
                 openChannelModal(channel = null) {
                     this.editingChannel = channel;
-                    this.channelForm = channel ? { ...channel } : {
+                    this.channelForm = channel ? { ...channel, use_gemini_sponsorblock: channel.use_gemini_sponsorblock ?? null } : {
                         url: '',
                         enabled: true,
                         scan_interval_hours: 6,
@@ -1025,7 +1043,8 @@
                         description_filter: '',
                         description_exclude: '',
                         download_since: '',
-                        delete_after_days: null
+                        delete_after_days: null,
+                        use_gemini_sponsorblock: null
                     };
                     this.showChannelModal = true;
                 },
@@ -1038,10 +1057,16 @@
                             : '/api/channels';
                         const method = this.editingChannel ? 'PUT' : 'POST';
 
+                        // Convert use_gemini_sponsorblock from select string to proper type
+                        const formData = { ...this.channelForm };
+                        if (formData.use_gemini_sponsorblock === 'true') formData.use_gemini_sponsorblock = true;
+                        else if (formData.use_gemini_sponsorblock === 'false') formData.use_gemini_sponsorblock = false;
+                        else if (formData.use_gemini_sponsorblock === 'null' || formData.use_gemini_sponsorblock === null || formData.use_gemini_sponsorblock === undefined) formData.use_gemini_sponsorblock = null;
+
                         const res = await fetch(url, {
                             method,
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(this.channelForm)
+                            body: JSON.stringify(formData)
                         });
 
                         const data = await res.json();

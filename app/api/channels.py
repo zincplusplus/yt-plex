@@ -23,6 +23,7 @@ class ChannelCreate(BaseModel):
     description_exclude: Optional[str] = None
     download_since: Optional[str] = None  # YYYY-MM-DD
     delete_after_days: Optional[int] = None
+    use_gemini_sponsorblock: Optional[bool] = None
 
 
 class ChannelUpdate(BaseModel):
@@ -37,6 +38,7 @@ class ChannelUpdate(BaseModel):
     description_exclude: Optional[str] = None
     download_since: Optional[str] = None  # YYYY-MM-DD
     delete_after_days: Optional[int] = None
+    use_gemini_sponsorblock: Optional[bool] = None
 
 
 @router.get("")

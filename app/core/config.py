@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     default_subtitle_langs: str = "en"
     default_delete_after_days: int = 30
 
+    gemini_api_key: str = ""
+
     download_queue_interval_seconds: int = 60
     cleanup_interval_hours: int = 24
 
