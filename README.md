@@ -1,29 +1,89 @@
-# YT-Plex
+# yt-plex
 
-YouTube downloader with per-channel settings, SponsorBlock, and auto-cleanup. Built for Plex.
+YouTube downloader with smart sponsor removal for Plex.
 
-## Setup
+## Architecture
 
-1. Copy `.env.example` to `.env` and fill in your values:
+Four independent services connected by a shared queue (`data/queue.md`). Each has a scheduler (dumb timer) and can also be triggered manually via the API.
 
-```bash
-cp .env.example .env
+```
+Scanner → [ ] pending → Downloader → [p] processing → Post-processor → [x] done
+                                                                         ↑
+                                                          Cleaner: deletes old [x] → [d]
 ```
 
-2. Set up passwordless SSH to your server:
+### Queue statuses
 
-```bash
-ssh-copy-id user@your-server-ip
+| Char | Status          | Meaning                                             |
+| ---- | --------------- | --------------------------------------------------- |
+| ` `  | pending         | Scanned, waiting to download                        |
+| `↓`  | downloading     | Download in progress                                |
+| `p`  | processing      | Post-processing (SponsorBlock + smart_cut)          |
+| `x`  | done            | Complete                                            |
+| `!`  | download_failed | Failed to download after 3 attempts                 |
+| `e`  | process_failed  | Failed to post-process after 3 attempts             |
+| `d`  | deleted         | Removed by retention, channel deletion, or manually |
+
+### Queue format
+
+Each line in `data/queue.md`:
+
+```
+- [status] upload_date | channel | title | video_id
 ```
 
-## Deploy
+| Field       | Used by                             | Purpose                                                      |
+| ----------- | ----------------------------------- | ------------------------------------------------------------ |
+| status      | All services                        | Determines which service picks up the entry                  |
+| upload_date | Cleaner                             | Retention check (`now - date > retention_days`)              |
+| channel     | Cleaner, Downloader, UI             | Per-channel retention, download folder organization, display |
+| title       | UI                                  | Display only                                                 |
+| video_id    | Scanner, Downloader, Post-processor | Dedup, yt-dlp download, SponsorBlock API lookup              |
+
+### Services
+
+**Scanner** — Fetches recent videos from configured YouTube channels via yt-dlp (`extract_flat=True`, up to 200 per channel). Skips videos already in the queue. Adds new ones as `[ ]` pending, oldest first so the newest video appears as "recently added" in Plex.
+
+- Scheduler: runs every `scan_interval` minutes (default 30)
+- Manual: `POST /api/scan-now`
+- When a source is added: queues the most recent N videos (default 1, configurable via `latest` field in the add form) and auto-sets `start_after` to the oldest queued video's Unix timestamp, so future scans only pick up newer videos
+- Filtering pipeline (in order): already in queue → start_date → shorts → livestreams → title filters → (full metadata fetch if needed) → description filters
+- Auto-filters: shorts (< 60s or `#shorts` in title) and livestreams are always skipped
+- Per-source filters: `title_include`, `title_exclude` (regex), `description_include`, `description_exclude` (regex)
+- Filtering is cheap: 1 call per channel for the flat extract. Full metadata fetch (1 extra call per video) only for videos that pass title filters and need description filtering
+- Note: since `start_after` is auto-set on every source, every new video needs a full metadata fetch to check its timestamp. In practice this is 0-1 new videos per scan
+
+**Downloader** — Downloads the first `[ ]` pending video. Marks `[↓]` while downloading, then `[p]` when done. In a single yt-dlp call: downloads video (H.264) + audio (AAC), merges to MP4, downloads + embeds English subtitles, downloads thumbnail. yt-dlp also writes `.info.json` with full metadata for the post-processor. Files go to `downloads/{channel}/{video_id}/`.
+
+- Scheduler: runs continuously, picks up pending videos immediately
+- Manual: `POST /api/queue/{video_id}/download-now`
+- After 3 consecutive failures: marks `[!]`
+- Partial downloads: yt-dlp writes `.part` files and resumes automatically
+- On startup: any `[↓]` entries are reset to `[ ]` (interrupted downloads get retried)
+
+**Post-processor** — Picks up `[p]` videos. Reads `.info.json` from the video folder. Fetches SponsorBlock segments (with Gemini fallback), runs smart_cut via ffmpeg to remove sponsor segments, renames thumbnail to `poster.jpg`, writes Plex-compatible `.nfo` metadata. Marks `[x]` done.
+
+- Scheduler: runs continuously, picks up processing videos immediately
+- After 3 consecutive failures: marks `[e]`
+- Runs concurrently with downloads (video N+1 downloads while video N is processed)
+
+**Cleaner** — Deletes video files older than `retention_days` (default 14, per-channel or global). Marks `[d]`.
+
+- Scheduler: runs once per day
+- Manual: `DELETE /api/queue/{video_id}` (immediate)
+
+### Failure handling
+
+Download and post-process failures are tracked with in-memory counters. After 3 consecutive failures, the video is marked `[!]` or `[e]` in the queue and stays there until manually retried. Retry via the API sends `[!]` back to `[ ]` and `[e]` back to `[p]`.
+
+### Concurrency
+
+The downloader, post-processor, and cleaner all write to `queue.md`. File writes must be serialized (e.g., asyncio lock) to prevent corruption.
+
+## Local development
 
 ```bash
-./deploy.sh
+pip install -r requirements.txt && cd app/static && npm install && npm run build && cd ../.. && DATA_DIR=./data DOWNLOADS_DIR=./downloads uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-exclude '.venv'
 ```
 
-Pushes your code to the server and rebuilds the container. Your database and downloaded videos are preserved.
-
-## Access
-
-Open `http://your-server-ip:8080` in your browser.
+Open http://localhost:8080

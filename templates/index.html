@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yt-plex</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Newsreader:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0a;--surface:#111;--surface2:#1a1a1a;--border:#222;
+  --text:#c8c8c8;--text-dim:#666;--text-bright:#f0f0f0;
+  --red:#ff3b30;--red-dim:#ff3b3020;--green:#34c759;--green-dim:#34c75920;
+  --yellow:#ffd60a;--yellow-dim:#ffd60a18;--blue:#0a84ff;--blue-dim:#0a84ff20;
+  --mono:'JetBrains Mono',monospace;--serif:'Newsreader',Georgia,serif;
+  --radius:3px;
+}
+html{font-size:14px;color-scheme:dark}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:14px;min-height:100vh;
+  background-image:radial-gradient(ellipse at 50% 0%,#1a1a1a 0%,var(--bg) 70%)}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+
+/* Layout */
+.shell{max-width:860px;margin:0 auto;padding:2rem 1.5rem 4rem}
+
+/* Header */
+header{margin-bottom:3rem;animation:fadeDown .5s ease}
+.logo{display:flex;align-items:baseline;gap:.75rem;margin-bottom:.25rem}
+.logo h1{font-size:1.4rem;font-weight:700;color:var(--text-bright);letter-spacing:-.03em}
+.logo .dot{width:8px;height:8px;background:var(--red);border-radius:50%;
+  animation:pulse 2s ease-in-out infinite;flex-shrink:0;position:relative;top:-2px}
+.tagline{font-family:var(--serif);font-style:italic;color:var(--text-dim)}
+
+/* Sections */
+section{margin-bottom:2.5rem;animation:fadeUp .5s ease both}
+section:nth-child(2){animation-delay:.1s}
+section:nth-child(3){animation-delay:.2s}
+section:nth-child(4){animation-delay:.3s}
+section:nth-child(5){animation-delay:.4s}
+
+.section-label{text-transform:uppercase;letter-spacing:.15em;
+  color:var(--text-dim);margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.section-header .section-label{margin-bottom:0;flex:1}
+
+/* Add source form */
+.add-form{display:flex;flex-direction:column;gap:.5rem}
+.input-row{display:flex;gap:.5rem}
+input[type="text"],input[type="url"],input[type="date"],input[type="number"]{
+  background:var(--surface);border:1px solid var(--border);color:var(--text-bright);
+  padding:.55rem .75rem;font-family:var(--mono);border-radius:var(--radius);
+  outline:none;transition:border-color .2s}
+input:focus{border-color:var(--red)}
+input::placeholder{color:#444}
+.url-input{flex:1}
+.btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:.55rem 1rem;font-family:var(--mono);cursor:pointer;
+  border-radius:var(--radius);transition:all .15s;white-space:nowrap}
+.btn:hover{border-color:#444;color:var(--text-bright);background:#222}
+.btn-red{color:var(--red)}
+.btn-red:hover{background:var(--red-dim);border-color:var(--red)}
+.btn-submit{color:var(--red);border-color:#333}
+.btn-submit:hover{background:var(--red-dim);border-color:var(--red)}
+.btn-blue{color:var(--blue)}
+.btn-blue:hover{background:var(--blue-dim);border-color:var(--blue)}
+.btn-sm{padding:.3rem .6rem}
+
+/* Advanced toggle */
+.advanced-toggle{color:var(--text-dim);cursor:pointer;
+  display:inline-flex;align-items:center;gap:.35rem;margin-top:.15rem;user-select:none}
+.advanced-toggle:hover{color:var(--text)}
+.advanced-toggle .arrow{transition:transform .2s;display:inline-block}
+.advanced-toggle.open .arrow{transform:rotate(90deg)}
+.advanced-fields{display:none;flex-direction:column;gap:.5rem;padding-top:.5rem}
+.advanced-fields.show{display:flex}
+.field-pair{display:flex;gap:.5rem}
+.field-pair input{flex:1}
+.field-label{color:var(--text-dim);margin-bottom:.2rem}
+
+/* Sources list */
+.source-item{display:flex;align-items:center;justify-content:space-between;
+  padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);margin-bottom:.35rem;transition:border-color .15s}
+.source-item:hover{border-color:#333}
+.source-info{display:flex;flex-direction:column;gap:.1rem;min-width:0;flex:1}
+.source-name{color:var(--text-bright);font-weight:500;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-url{color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-tags{display:flex;gap:.35rem;margin-top:.15rem;flex-wrap:wrap}
+.tag{padding:.1rem .4rem;border-radius:2px;color:var(--text-dim);
+  background:var(--surface2);border:1px solid var(--border)}
+.btn-delete{padding:.3rem .6rem;flex-shrink:0;margin-left:.75rem}
+.empty-state{color:var(--text-dim);font-style:italic;font-family:var(--serif)}
+
+/* Queue table */
+.queue-table{width:100%;border-collapse:collapse}
+.queue-table th{text-transform:uppercase;letter-spacing:.1em;
+  color:var(--text-dim);text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--border);
+  font-weight:400}
+.queue-table td{padding:.45rem .5rem;border-bottom:1px solid #161616;
+  vertical-align:middle}
+.queue-table tr{transition:background .15s}
+.queue-table tbody tr:hover{background:var(--surface)}
+
+/* Status indicators */
+.status{display:inline-flex;align-items:center;gap:.4rem}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.status-pending .status-dot{background:var(--yellow)}
+.status-downloading .status-dot{background:var(--blue);animation:pulse 1s ease-in-out infinite}
+.status-processing .status-dot{background:var(--blue);animation:pulse 1.5s ease-in-out infinite}
+.status-done .status-dot{background:var(--green)}
+.status-download_failed .status-dot{background:var(--red)}
+.status-process_failed .status-dot{background:var(--red)}
+.status-deleted .status-dot{display:none}
+
+.td-title{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--text-bright)}
+.td-title.clickable{cursor:pointer}
+.td-title.clickable:hover{color:var(--red)}
+tr.row-deleted td{text-decoration:line-through;color:var(--text-dim)}
+tr.row-deleted .td-title{color:var(--text-dim)}
+.td-channel{color:var(--text-dim)}
+.td-date{color:var(--text-dim);white-space:nowrap}
+.td-actions{text-align:right;white-space:nowrap}
+.td-actions .btn{margin-left:.25rem}
+
+/* Queue stats */
+.queue-stats{display:flex;gap:1.25rem;margin-bottom:.75rem;flex-wrap:wrap}
+.stat{display:flex;align-items:center;gap:.35rem;color:var(--text-dim)}
+.stat-num{color:var(--text-bright);font-weight:700}
+.stat-pending .stat-num{color:var(--yellow)}
+.stat-active .stat-num{color:var(--blue)}
+.stat-done .stat-num{color:var(--green)}
+.stat-failed .stat-num{color:var(--red)}
+
+/* Toast notifications */
+.toast-container{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;
+  display:flex;flex-direction:column;gap:.5rem}
+.toast{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:.5rem 1rem;font-family:var(--mono);border-radius:var(--radius);
+  animation:slideIn .3s ease;box-shadow:0 4px 20px #0008}
+.toast-error{border-color:var(--red);color:var(--red)}
+.toast-success{border-color:var(--green);color:var(--green)}
+
+/* Settings form */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem .75rem}
+.settings-grid .field{display:flex;flex-direction:column;gap:.2rem}
+.settings-grid .field.full{grid-column:1/-1}
+.settings-grid .field-label{color:var(--text-dim);margin-bottom:.1rem}
+.settings-grid input[type="text"],
+.settings-grid input[type="number"],
+.settings-grid input[type="password"],
+.settings-grid select{width:100%}
+.settings-actions{margin-top:.75rem;display:flex;gap:.5rem;align-items:center}
+.settings-saved{color:var(--green);opacity:0;transition:opacity .3s}
+.settings-saved.show{opacity:1}
+.toggle-row{display:flex;align-items:center;gap:.5rem;padding:.55rem 0}
+.toggle-switch{position:relative;width:36px;height:20px;flex-shrink:0}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;inset:0;background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;cursor:pointer;transition:all .2s}
+.toggle-slider::before{content:'';position:absolute;width:14px;height:14px;left:2px;bottom:2px;
+  background:var(--text-dim);border-radius:50%;transition:all .2s}
+.toggle-switch input:checked+.toggle-slider{background:var(--red-dim);border-color:var(--red)}
+.toggle-switch input:checked+.toggle-slider::before{transform:translateX(16px);background:var(--red)}
+
+/* Loading */
+.loading{color:var(--text-dim)}
+.spinner{display:inline-block;width:12px;height:12px;border:1.5px solid var(--border);
+  border-top-color:var(--red);border-radius:50%;animation:spin .6s linear infinite;
+  vertical-align:middle;margin-right:.4rem}
+
+/* Animations */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fadeDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:600px){
+  .shell{padding:1.25rem 1rem 3rem}
+  .input-row{flex-direction:column}
+  .field-pair{flex-direction:column}
+  .td-title{max-width:150px}
+  .queue-table{}
+  .settings-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <div class="logo">
+      <h1>yt-plex</h1>
+      <span class="dot"></span>
+    </div>
+    <p class="tagline">YouTube to Plex, automated</p>
+  </header>
+
+  <!-- Add Source -->
+  <section>
+    <div class="section-label">Add source</div>
+    <form class="add-form" id="addForm" onsubmit="return addSource(event)">
+      <div class="input-row">
+        <input type="url" class="url-input" id="sourceUrl" placeholder="https://www.youtube.com/@channel" required>
+        <input type="number" id="latestCount" min="1" value="1" title="Number of recent videos to queue" style="width:80px" placeholder="latest">
+        <button type="submit" class="btn btn-submit" id="submitBtn">add</button>
+      </div>
+      <div class="advanced-toggle" onclick="toggleAdvanced()">
+        <span class="arrow">&#9654;</span> filters
+      </div>
+      <div class="advanced-fields" id="advancedFields">
+        <div class="field-pair">
+          <div>
+            <div class="field-label">title include (regex)</div>
+            <input type="text" id="titleInclude" placeholder="e.g. review|unboxing">
+          </div>
+          <div>
+            <div class="field-label">title exclude (regex)</div>
+            <input type="text" id="titleExclude" placeholder="e.g. shorts|clip">
+          </div>
+        </div>
+        <div class="field-pair">
+          <div>
+            <div class="field-label">desc include (regex)</div>
+            <input type="text" id="descInclude" placeholder="e.g. sponsor|collab">
+          </div>
+          <div>
+            <div class="field-label">desc exclude (regex)</div>
+            <input type="text" id="descExclude" placeholder="e.g. giveaway">
+          </div>
+        </div>
+        <div>
+          <div class="field-label">retention (days)</div>
+          <input type="number" id="retentionDays" placeholder="e.g. 30" min="1" style="width:150px">
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <!-- Sources -->
+  <section>
+    <div class="section-header">
+      <div class="section-label">Sources</div>
+      <button class="btn btn-sm btn-blue" onclick="scanNow()" id="scanBtn">scan now</button>
+    </div>
+    <div id="sourcesList"><span class="loading"><span class="spinner"></span>loading</span></div>
+  </section>
+
+  <!-- Settings -->
+  <section>
+    <div class="section-label">Settings</div>
+    <div id="settingsForm">
+      <div class="settings-grid">
+        <div class="field">
+          <div class="field-label">scan interval (min)</div>
+          <input type="number" id="setScanInterval" min="1">
+        </div>
+        <div class="field">
+          <div class="field-label">sleep between downloads (sec)</div>
+          <input type="number" id="setSleep" min="0">
+        </div>
+        <div class="field">
+          <div class="field-label">preferred resolution</div>
+          <select id="setResolution">
+            <option value="360p">360p</option>
+            <option value="480p">480p</option>
+            <option value="720p">720p</option>
+            <option value="1080p">1080p</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="field-label">retention (days)</div>
+          <input type="number" id="setRetention" min="1">
+        </div>
+        <div class="field">
+          <div class="toggle-row">
+            <label class="toggle-switch">
+              <input type="checkbox" id="setSponsorblock">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>SponsorBlock</span>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-label">Gemini API key</div>
+          <input type="password" id="setGemini" placeholder="optional">
+        </div>
+        <div class="field full">
+          <div class="field-label">output template</div>
+          <input type="text" id="setTemplate">
+        </div>
+        <div class="field full">
+          <div class="field-label">downloads host path (for CasaOS file links)</div>
+          <input type="text" id="setHostPath" placeholder="/DATA/downloads">
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-submit" onclick="saveSettings()">save</button>
+        <span class="settings-saved" id="settingsSaved">saved</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Queue -->
+  <section>
+    <div class="section-label">Queue</div>
+    <div id="queueStats" class="queue-stats"></div>
+    <div id="queueList"><span class="loading"><span class="spinner"></span>loading</span></div>
+  </section>
+
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+
+// --- Toast ---
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ' toast-' + type : '');
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+
+// --- API helpers ---
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+// --- Sources ---
+async function loadSources() {
+  try {
+    const sources = await api('/sources');
+    const el = $('#sourcesList');
+    if (!sources.length) {
+      el.innerHTML = '<p class="empty-state">No sources configured yet</p>';
+      return;
+    }
+    el.innerHTML = sources.map((s, i) => {
+      const tags = [];
+      if (s.start_after) tags.push('auto-start');
+      if (s.title_include) tags.push('title include: ' + s.title_include);
+      if (s.title_exclude) tags.push('title exclude: ' + s.title_exclude);
+      if (s.description_include) tags.push('desc include: ' + s.description_include);
+      if (s.description_exclude) tags.push('desc exclude: ' + s.description_exclude);
+      if (s.retention_days) tags.push(s.retention_days + 'd retention');
+      return `<div class="source-item">
+        <div class="source-info">
+          <span class="source-name">${esc(s.name)}</span>
+          <span class="source-url">${esc(s.url)}</span>
+          ${tags.length ? '<div class="source-tags">' + tags.map(t => `<span class="tag">${esc(t)}</span>`).join('') + '</div>' : ''}
+        </div>
+        <button class="btn btn-delete btn-red" onclick="deleteSource(${i})">remove</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    $('#sourcesList').innerHTML = '<p class="empty-state">Failed to load sources</p>';
+  }
+}
+
+async function addSource(e) {
+  e.preventDefault();
+  const btn = $('#submitBtn');
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const body = { url: $('#sourceUrl').value };
+    const latest = parseInt($('#latestCount').value) || 1;
+    body.latest = latest;
+    const ti = $('#titleInclude').value;
+    const te = $('#titleExclude').value;
+    const di = $('#descInclude').value;
+    const de = $('#descExclude').value;
+    const rd = $('#retentionDays').value;
+    if (ti) body.title_include = ti;
+    if (te) body.title_exclude = te;
+    if (di) body.description_include = di;
+    if (de) body.description_exclude = de;
+    if (rd) body.retention_days = parseInt(rd);
+    const result = await api('/sources', { method: 'POST', body: JSON.stringify(body) });
+    const msg = result.queued > 0
+      ? `Added: ${result.name} (${result.queued} video${result.queued > 1 ? 's' : ''} queued)`
+      : `Added: ${result.name}`;
+    toast(msg, 'success');
+    $('#sourceUrl').value = '';
+    $('#latestCount').value = '1';
+    $('#titleInclude').value = '';
+    $('#titleExclude').value = '';
+    $('#descInclude').value = '';
+    $('#descExclude').value = '';
+    $('#retentionDays').value = '';
+    loadSources();
+    loadQueue();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'add';
+  }
+}
+
+async function deleteSource(index) {
+  const del_files = confirm('Also delete downloaded files?');
+  try {
+    const url = '/sources/' + index + (del_files ? '?delete_files=true' : '');
+    const result = await api(url, { method: 'DELETE' });
+    const msg = del_files && result.files_deleted
+      ? `Removed: ${result.removed.name} (${result.files_deleted} files deleted)`
+      : `Removed: ${result.removed.name}`;
+    toast(msg, 'success');
+    loadSources();
+    if (del_files) loadQueue();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function scanNow() {
+  const btn = $('#scanBtn');
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const result = await api('/scan-now', { method: 'POST' });
+    toast(`Scan complete: ${result.added} new video${result.added !== 1 ? 's' : ''}`, 'success');
+    loadQueue();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'scan now';
+  }
+}
+
+// --- Advanced toggle ---
+function toggleAdvanced() {
+  const toggle = document.querySelector('.advanced-toggle');
+  const fields = $('#advancedFields');
+  toggle.classList.toggle('open');
+  fields.classList.toggle('show');
+}
+
+// --- Queue ---
+const statusLabels = {
+  pending: 'pending',
+  downloading: 'downloading',
+  processing: 'processing',
+  done: 'done',
+  download_failed: 'failed',
+  process_failed: 'failed',
+  deleted: 'deleted',
+};
+
+async function loadQueue() {
+  try {
+    const queue = await api('/queue');
+    const el = $('#queueList');
+    const stats = $('#queueStats');
+
+    const pending = queue.filter(q => q.status === 'pending').length;
+    const active = queue.filter(q => q.status === 'downloading' || q.status === 'processing').length;
+    const done = queue.filter(q => q.status === 'done').length;
+    const failed = queue.filter(q => q.status === 'download_failed' || q.status === 'process_failed').length;
+    const total = queue.length;
+
+    stats.innerHTML = `
+      <div class="stat stat-pending"><span class="stat-num">${pending}</span> pending</div>
+      ${active ? `<div class="stat stat-active"><span class="stat-num">${active}</span> active</div>` : ''}
+      <div class="stat stat-done"><span class="stat-num">${done}</span> done</div>
+      ${failed ? `<div class="stat stat-failed"><span class="stat-num">${failed}</span> failed</div>` : ''}
+      <div class="stat"><span class="stat-num">${total}</span> total</div>`;
+
+    if (!queue.length) {
+      el.innerHTML = '<p class="empty-state">Queue is empty — add a source to get started</p>';
+      return;
+    }
+
+    el.innerHTML = `<table class="queue-table">
+      <thead><tr><th style="width:30px"></th><th>title</th><th>channel</th><th>date</th><th></th></tr></thead>
+      <tbody>${queue.map(q => {
+        const isDeleted = q.status === 'deleted';
+        const isDone = q.status === 'done';
+        const isPending = q.status === 'pending';
+        const isFailed = q.status === 'download_failed' || q.status === 'process_failed';
+
+        let actions = '';
+        if (isPending) {
+          actions = `<button class="btn btn-sm btn-blue" onclick="downloadNow('${q.video_id}')">now</button><button class="btn btn-sm btn-red" onclick="deleteVideo('${q.video_id}')">del</button>`;
+        } else if (isFailed) {
+          actions = `<button class="btn btn-sm" onclick="retryVideo('${q.video_id}')">retry</button><button class="btn btn-sm btn-red" onclick="deleteVideo('${q.video_id}')">del</button>`;
+        } else if (isDone) {
+          actions = `<button class="btn btn-sm btn-red" onclick="deleteVideo('${q.video_id}')">del</button>`;
+        }
+
+        return `<tr class="${isDeleted ? 'row-deleted' : ''}">
+          <td><span class="status status-${q.status}"><span class="status-dot"></span></span></td>
+          <td class="td-title${isDone ? ' clickable' : ''}" title="${isDone ? esc(videoPath(q)) : esc(q.title)}" ${isDone ? `data-channel="${esc(q.channel)}" data-vid="${q.video_id}" onclick="copyVideoPath(this)"` : ''}>${esc(q.title)}</td>
+          <td class="td-channel">${esc(q.channel)}</td>
+          <td class="td-date">${q.date}</td>
+          <td class="td-actions">${actions}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch (e) {
+    $('#queueList').innerHTML = '<p class="empty-state">Failed to load queue</p>';
+  }
+}
+
+async function downloadNow(videoId) {
+  try {
+    await api('/queue/' + videoId + '/download-now', { method: 'POST' });
+    toast('Moved to top', 'success');
+    loadQueue();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function retryVideo(videoId) {
+  try {
+    await api('/queue/' + videoId + '/retry', { method: 'POST' });
+    toast('Retrying', 'success');
+    loadQueue();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteVideo(videoId) {
+  try {
+    await api('/queue/' + videoId, { method: 'DELETE' });
+    toast('Deleted', 'success');
+    loadQueue();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// --- Settings ---
+let currentSettings = {};
+
+async function loadSettings() {
+  try {
+    const s = await api('/settings');
+    currentSettings = s;
+    $('#setScanInterval').value = s.scan_interval;
+    $('#setSleep').value = s.sleep_between_downloads;
+    $('#setResolution').value = s.preferred_resolution;
+    $('#setRetention').value = s.retention_days;
+    $('#setSponsorblock').checked = s.sponsorblock;
+    $('#setGemini').value = s.gemini_api_key;
+    $('#setTemplate').value = s.output_template;
+    $('#setHostPath').value = s.downloads_host_path;
+  } catch (e) {
+    toast('Failed to load settings', 'error');
+  }
+}
+
+async function saveSettings() {
+  try {
+    const body = {
+      scan_interval: parseInt($('#setScanInterval').value),
+      sleep_between_downloads: parseInt($('#setSleep').value),
+      preferred_resolution: $('#setResolution').value,
+      retention_days: parseInt($('#setRetention').value),
+      sponsorblock: $('#setSponsorblock').checked,
+      gemini_api_key: $('#setGemini').value,
+      output_template: $('#setTemplate').value,
+      downloads_host_path: $('#setHostPath').value,
+    };
+    await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
+    const el = $('#settingsSaved');
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2000);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// --- Utils ---
+function videoPath(q) {
+  const base = (currentSettings.downloads_host_path || currentSettings.downloads_dir || '/downloads').replace(/\/+$/, '');
+  return base + '/' + q.channel + '/' + q.video_id;
+}
+
+function copyVideoPath(el) {
+  const channel = el.getAttribute('data-channel');
+  const vid = el.getAttribute('data-vid');
+  const path = videoPath({channel, video_id: vid});
+  navigator.clipboard.writeText(path).then(
+    () => toast('Copied: ' + path, 'success'),
+    () => toast('Copy failed', 'error')
+  );
+}
+
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// --- Init ---
+loadSources();
+loadSettings();
+loadQueue();
+setInterval(loadQueue, 15000);
+</script>
+</body>
+</html>

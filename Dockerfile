@@ -1,32 +1,21 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install latest ffmpeg static build (Debian repos have old versions that
-# produce glitchy output when removing SponsorBlock segments)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends xz-utils wget && \
-    wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
-    tar xf ffmpeg-release-amd64-static.tar.xz && \
-    mv ffmpeg-*-static/ffmpeg ffmpeg-*-static/ffprobe /usr/local/bin/ && \
-    rm -rf ffmpeg-* && \
-    apt-get purge -y xz-utils wget && apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY app/ ./app/
+COPY main.py scanner.py downloader.py postprocessor.py videoqueue.py server.py settings.py ./
+COPY templates/ templates/
 
-# Create data and downloads directories
-RUN mkdir -p /app/data /app/downloads
+ENV DOWNLOADS_DIR=/downloads
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+RUN mkdir -p /data /downloads
 
 EXPOSE 8080
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "main.py"]
