@@ -44,8 +44,14 @@ section:nth-child(4){animation-delay:.3s}
 section:nth-child(5){animation-delay:.4s}
 
 .section-label{text-transform:uppercase;letter-spacing:.15em;
-  color:var(--text-dim);margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem}
+  color:var(--text-dim);margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem;
+  cursor:pointer;user-select:none}
+.section-label:hover{color:var(--text)}
+.section-label::before{content:'\25B6';font-size:.55em;transition:transform .2s;display:inline-block}
+.section-label.open::before{transform:rotate(90deg)}
 .section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.section-body{display:none}
+.section-body.open{display:block}
 .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
 .section-header .section-label{margin-bottom:0;flex:1}
 
@@ -95,7 +101,18 @@ input::placeholder{color:#444}
 .source-tags{display:flex;gap:.35rem;margin-top:.15rem;flex-wrap:wrap}
 .tag{padding:.1rem .4rem;border-radius:2px;color:var(--text-dim);
   background:var(--surface2);border:1px solid var(--border)}
-.btn-delete{padding:.3rem .6rem;flex-shrink:0;margin-left:.75rem}
+.source-actions{display:flex;gap:.35rem;flex-shrink:0;margin-left:.75rem}
+.btn-delete{padding:.3rem .6rem;flex-shrink:0}
+
+/* Edit modal */
+.modal-overlay{position:fixed;inset:0;background:#000a;z-index:200;display:flex;align-items:center;justify-content:center}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:1.5rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.75rem}
+.modal-title{color:var(--text-bright);font-weight:700;font-size:1rem}
+.modal-field{display:flex;flex-direction:column;gap:.2rem}
+.modal-field .field-label{color:var(--text-dim)}
+.modal-field input{width:100%}
+.modal-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.25rem}
 .empty-state{color:var(--text-dim);font-style:italic;font-family:var(--serif)}
 
 /* Queue table */
@@ -106,7 +123,12 @@ input::placeholder{color:#444}
 .queue-table td{padding:.45rem .5rem;border-bottom:1px solid #161616;
   vertical-align:middle}
 .queue-table tr{transition:background .15s}
-.queue-table tbody tr:hover{background:var(--surface)}
+  .queue-table tbody tr:hover{background:var(--surface)}
+  .events-list{margin-top:.75rem;display:flex;flex-direction:column;gap:.35rem}
+  .event-item{padding:.45rem .6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+  .event-top{display:flex;gap:.5rem;align-items:center;justify-content:space-between}
+  .event-msg{color:var(--text-dim);margin-top:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .event-meta{color:var(--text-dim)}
 
 /* Status indicators */
 .status{display:inline-flex;align-items:center;gap:.4rem}
@@ -121,8 +143,7 @@ input::placeholder{color:#444}
 
 .td-title{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--text-bright)}
-.td-title.clickable{cursor:pointer}
-.td-title.clickable:hover{color:var(--red)}
+.td-title.clickable{}
 tr.row-deleted td{text-decoration:line-through;color:var(--text-dim)}
 tr.row-deleted .td-title{color:var(--text-dim)}
 .td-channel{color:var(--text-dim)}
@@ -207,7 +228,8 @@ tr.row-deleted .td-title{color:var(--text-dim)}
 
   <!-- Add Source -->
   <section>
-    <div class="section-label">Add source</div>
+    <div class="section-label" data-section="add" onclick="toggleSection(this)">Add source</div>
+    <div class="section-body">
     <form class="add-form" id="addForm" onsubmit="return addSource(event)">
       <div class="input-row">
         <input type="url" class="url-input" id="sourceUrl" placeholder="https://www.youtube.com/@channel" required>
@@ -238,26 +260,40 @@ tr.row-deleted .td-title{color:var(--text-dim)}
             <input type="text" id="descExclude" placeholder="e.g. giveaway">
           </div>
         </div>
+        <div class="field-pair">
+          <div>
+            <div class="field-label">min minutes</div>
+            <input type="number" id="minMinutes" placeholder="e.g. 5" min="1">
+          </div>
+          <div>
+            <div class="field-label">max minutes</div>
+            <input type="number" id="maxMinutes" placeholder="e.g. 60" min="1">
+          </div>
+        </div>
         <div>
           <div class="field-label">retention (days)</div>
           <input type="number" id="retentionDays" placeholder="e.g. 30" min="1" style="width:150px">
         </div>
       </div>
     </form>
+    </div>
   </section>
 
   <!-- Sources -->
   <section>
     <div class="section-header">
-      <div class="section-label">Sources</div>
+      <div class="section-label" data-section="sources" onclick="toggleSection(this)">Sources</div>
       <button class="btn btn-sm btn-blue" onclick="scanNow()" id="scanBtn">scan now</button>
     </div>
+    <div class="section-body" id="sourcesBody">
     <div id="sourcesList"><span class="loading"><span class="spinner"></span>loading</span></div>
+    </div>
   </section>
 
   <!-- Settings -->
   <section>
-    <div class="section-label">Settings</div>
+    <div class="section-label" data-section="settings" onclick="toggleSection(this)">Settings</div>
+    <div class="section-body" id="settingsBody">
     <div id="settingsForm">
       <div class="settings-grid">
         <div class="field">
@@ -308,17 +344,25 @@ tr.row-deleted .td-title{color:var(--text-dim)}
         <span class="settings-saved" id="settingsSaved">saved</span>
       </div>
     </div>
+    </div>
   </section>
 
   <!-- Queue -->
   <section>
-    <div class="section-label">Queue</div>
+    <div class="section-label" data-section="queue" onclick="toggleSection(this)">Queue</div>
+    <div class="section-body">
     <div id="queueStats" class="queue-stats"></div>
     <div id="queueList"><span class="loading"><span class="spinner"></span>loading</span></div>
+    <div style="margin-top:1rem">
+      <div class="field-label" style="margin-bottom:.35rem">recent events</div>
+      <div id="queueEvents" class="events-list"><span class="loading"><span class="spinner"></span>loading</span></div>
+    </div>
+    </div>
   </section>
 
 </div>
 
+<div id="editModal"></div>
 <div class="toast-container" id="toasts"></div>
 
 <script>
@@ -340,8 +384,14 @@ async function api(path, opts = {}) {
     ...opts,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || res.statusText);
+    const err = await res.json().catch(() => ({}));
+    const message =
+      err?.error?.message ||
+      err?.detail?.message ||
+      err?.detail ||
+      res.statusText;
+    const firstFieldMsg = err?.error?.fields?.[0]?.message;
+    throw new Error(firstFieldMsg ? `${message}: ${firstFieldMsg}` : message);
   }
   return res.json();
 }
@@ -362,6 +412,8 @@ async function loadSources() {
       if (s.title_exclude) tags.push('title exclude: ' + s.title_exclude);
       if (s.description_include) tags.push('desc include: ' + s.description_include);
       if (s.description_exclude) tags.push('desc exclude: ' + s.description_exclude);
+      if (s.min_minutes) tags.push('>=' + s.min_minutes + 'min');
+      if (s.max_minutes) tags.push('<=' + s.max_minutes + 'min');
       if (s.retention_days) tags.push(s.retention_days + 'd retention');
       return `<div class="source-item">
         <div class="source-info">
@@ -369,7 +421,10 @@ async function loadSources() {
           <span class="source-url">${esc(s.url)}</span>
           ${tags.length ? '<div class="source-tags">' + tags.map(t => `<span class="tag">${esc(t)}</span>`).join('') + '</div>' : ''}
         </div>
-        <button class="btn btn-delete btn-red" onclick="deleteSource(${i})">remove</button>
+        <div class="source-actions">
+          <button class="btn btn-sm" onclick="editSource(${i})">edit</button>
+          <button class="btn btn-sm btn-red" onclick="deleteSource(${i})">remove</button>
+        </div>
       </div>`;
     }).join('');
   } catch (e) {
@@ -390,11 +445,15 @@ async function addSource(e) {
     const te = $('#titleExclude').value;
     const di = $('#descInclude').value;
     const de = $('#descExclude').value;
+    const mn = $('#minMinutes').value;
+    const mx = $('#maxMinutes').value;
     const rd = $('#retentionDays').value;
     if (ti) body.title_include = ti;
     if (te) body.title_exclude = te;
     if (di) body.description_include = di;
     if (de) body.description_exclude = de;
+    if (mn) body.min_minutes = parseInt(mn);
+    if (mx) body.max_minutes = parseInt(mx);
     if (rd) body.retention_days = parseInt(rd);
     const result = await api('/sources', { method: 'POST', body: JSON.stringify(body) });
     const msg = result.queued > 0
@@ -407,9 +466,12 @@ async function addSource(e) {
     $('#titleExclude').value = '';
     $('#descInclude').value = '';
     $('#descExclude').value = '';
+    $('#minMinutes').value = '';
+    $('#maxMinutes').value = '';
     $('#retentionDays').value = '';
     loadSources();
     loadQueue();
+    loadQueueEvents();
   } catch (e) {
     toast(e.message, 'error');
   } finally {
@@ -428,8 +490,87 @@ async function deleteSource(index) {
       : `Removed: ${result.removed.name}`;
     toast(msg, 'success');
     loadSources();
-    if (del_files) loadQueue();
+    if (del_files) {
+      loadQueue();
+      loadQueueEvents();
+    }
   } catch (e) { toast(e.message, 'error'); }
+}
+
+async function editSource(index) {
+  try {
+    const sources = await api('/sources');
+    const s = sources[index];
+    if (!s) return toast('Source not found', 'error');
+    $('#editModal').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal-box">
+        <div class="modal-title">${esc(s.name)}</div>
+        <a href="${esc(s.url)}" target="_blank" rel="noopener" style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${esc(s.url)}</a>
+        <div class="modal-field">
+          <div class="field-label">title include (regex)</div>
+          <input type="text" id="editTitleInclude" value="${esc(s.title_include||'')}">
+        </div>
+        <div class="modal-field">
+          <div class="field-label">title exclude (regex)</div>
+          <input type="text" id="editTitleExclude" value="${esc(s.title_exclude||'')}">
+        </div>
+        <div class="modal-field">
+          <div class="field-label">desc include (regex)</div>
+          <input type="text" id="editDescInclude" value="${esc(s.description_include||'')}">
+        </div>
+        <div class="modal-field">
+          <div class="field-label">desc exclude (regex)</div>
+          <input type="text" id="editDescExclude" value="${esc(s.description_exclude||'')}">
+        </div>
+        <div style="display:flex;gap:16px">
+          <div class="modal-field" style="flex:1">
+            <div class="field-label">min minutes</div>
+            <input type="number" id="editMinMinutes" min="1" value="${s.min_minutes||''}">
+          </div>
+          <div class="modal-field" style="flex:1">
+            <div class="field-label">max minutes</div>
+            <input type="number" id="editMaxMinutes" min="1" value="${s.max_minutes||''}">
+          </div>
+        </div>
+        <div class="modal-field">
+          <div class="field-label">retention (days)</div>
+          <input type="number" id="editRetention" min="1" value="${s.retention_days||''}" style="width:150px">
+        </div>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeModal()">cancel</button>
+          <button class="btn btn-submit" onclick="saveSource(${index})">save</button>
+        </div>
+      </div>
+    </div>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveSource(index) {
+  try {
+    const body = {};
+    const ti = $('#editTitleInclude').value;
+    const te = $('#editTitleExclude').value;
+    const di = $('#editDescInclude').value;
+    const de = $('#editDescExclude').value;
+    const mn = $('#editMinMinutes').value;
+    const mx = $('#editMaxMinutes').value;
+    const rd = $('#editRetention').value;
+    body.title_include = ti || null;
+    body.title_exclude = te || null;
+    body.description_include = di || null;
+    body.description_exclude = de || null;
+    body.min_minutes = mn ? parseInt(mn) : null;
+    body.max_minutes = mx ? parseInt(mx) : null;
+    body.retention_days = rd ? parseInt(rd) : null;
+    await api('/sources/' + index, { method: 'PUT', body: JSON.stringify(body) });
+    closeModal();
+    toast('Source updated', 'success');
+    loadSources();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function closeModal() {
+  $('#editModal').innerHTML = '';
 }
 
 async function scanNow() {
@@ -440,11 +581,40 @@ async function scanNow() {
     const result = await api('/scan-now', { method: 'POST' });
     toast(`Scan complete: ${result.added} new video${result.added !== 1 ? 's' : ''}`, 'success');
     loadQueue();
+    loadQueueEvents();
   } catch (e) {
     toast(e.message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'scan now';
+  }
+}
+
+// --- Section collapse ---
+const _sectionDefaults = {add: true, sources: true, settings: false, queue: true};
+function _getSectionState() {
+  try { return JSON.parse(localStorage.getItem('yt-plex-sections')) || {}; } catch { return {}; }
+}
+function _initSections() {
+  const saved = _getSectionState();
+  document.querySelectorAll('.section-label[data-section]').forEach(label => {
+    const key = label.dataset.section;
+    const isOpen = key in saved ? saved[key] : (_sectionDefaults[key] ?? true);
+    const body = label.closest('section').querySelector('.section-body');
+    if (isOpen) { label.classList.add('open'); body && body.classList.add('open'); }
+  });
+}
+_initSections();
+
+function toggleSection(label) {
+  label.classList.toggle('open');
+  const body = label.closest('section').querySelector('.section-body');
+  if (body) body.classList.toggle('open');
+  const key = label.dataset.section;
+  if (key) {
+    const saved = _getSectionState();
+    saved[key] = label.classList.contains('open');
+    localStorage.setItem('yt-plex-sections', JSON.stringify(saved));
   }
 }
 
@@ -510,7 +680,7 @@ async function loadQueue() {
 
         return `<tr class="${isDeleted ? 'row-deleted' : ''}">
           <td><span class="status status-${q.status}"><span class="status-dot"></span></span></td>
-          <td class="td-title${isDone ? ' clickable' : ''}" title="${isDone ? esc(videoPath(q)) : esc(q.title)}" ${isDone ? `data-channel="${esc(q.channel)}" data-vid="${q.video_id}" onclick="copyVideoPath(this)"` : ''}>${esc(q.title)}</td>
+          <td class="td-title${isDone ? ' clickable' : ''}" ${isDone ? `data-channel="${esc(q.channel)}" data-vid="${q.video_id}" onclick="copyVideoPath(this)"` : ''}>${esc(q.title)}</td>
           <td class="td-channel">${esc(q.channel)}</td>
           <td class="td-date">${q.date}</td>
           <td class="td-actions">${actions}</td>
@@ -522,11 +692,35 @@ async function loadQueue() {
   }
 }
 
+async function loadQueueEvents() {
+  try {
+    const events = await api('/queue/events?limit=25');
+    const el = $('#queueEvents');
+    if (!events.length) {
+      el.innerHTML = '<p class="empty-state">No events yet</p>';
+      return;
+    }
+    el.innerHTML = events.map(e => {
+      const transition = (e.from_status || '?') + ' -> ' + (e.to_status || '?');
+      return `<div class="event-item">
+        <div class="event-top">
+          <div><span class="status status-${e.to_status || 'pending'}"><span class="status-dot"></span></span> ${esc(e.video_id)} <span class="event-meta">(${esc(transition)})</span></div>
+          <div class="event-meta">${esc(e.at || '')}</div>
+        </div>
+        <div class="event-msg">${esc((e.actor || 'system') + (e.message ? ': ' + e.message : ''))}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    $('#queueEvents').innerHTML = '<p class="empty-state">Failed to load events</p>';
+  }
+}
+
 async function downloadNow(videoId) {
   try {
     await api('/queue/' + videoId + '/download-now', { method: 'POST' });
     toast('Moved to top', 'success');
     loadQueue();
+    loadQueueEvents();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -535,6 +729,7 @@ async function retryVideo(videoId) {
     await api('/queue/' + videoId + '/retry', { method: 'POST' });
     toast('Retrying', 'success');
     loadQueue();
+    loadQueueEvents();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -543,6 +738,7 @@ async function deleteVideo(videoId) {
     await api('/queue/' + videoId, { method: 'DELETE' });
     toast('Deleted', 'success');
     loadQueue();
+    loadQueueEvents();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -614,7 +810,9 @@ function esc(s) {
 loadSources();
 loadSettings();
 loadQueue();
+loadQueueEvents();
 setInterval(loadQueue, 15000);
+setInterval(loadQueueEvents, 15000);
 </script>
 </body>
 </html>

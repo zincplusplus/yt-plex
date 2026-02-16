@@ -2,10 +2,114 @@
 
 Base URL: `http://localhost:8080`
 
+## Error Contract
+
+Validation and request errors return:
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "Invalid request payload",
+    "fields": [
+      { "field": "body.latest", "message": "Input should be less than or equal to 200" }
+    ]
+  }
+}
+```
+
+Notes:
+- Invalid payloads return `400` with the schema above.
+- Most `404` and `409` errors also return the same `error` envelope (`code` + `message`).
+
 ## Pages
 
 ### `GET /`
 Serves the web UI (`templates/index.html`).
+
+## Observability
+
+### `GET /healthz`
+Basic liveness probe.
+
+**Response:** `200 OK`
+```json
+{ "ok": true }
+```
+
+### `GET /readyz`
+Readiness probe. Validates queue/source reads and worker heartbeats.
+
+**Response:** `200 OK` when ready, `503` when not ready.
+```json
+{
+  "ok": true,
+  "workers": {
+    "scanner": {
+      "last_heartbeat": "2026-02-16T21:20:00Z",
+      "heartbeat_age_seconds": 3,
+      "alive": true
+    }
+  }
+}
+```
+
+### `GET /api/system/status`
+Runtime snapshot for reactive UI dashboards.
+
+**Response:** `200 OK`
+```json
+{
+  "now": "2026-02-16T21:20:03Z",
+  "started_at": "2026-02-16T20:00:00Z",
+  "queue": {
+    "pending": 2,
+    "downloading": 1,
+    "processing": 0,
+    "done": 14,
+    "download_failed": 1,
+    "process_failed": 0,
+    "deleted": 3,
+    "total": 21,
+    "active": 1,
+    "failed": 1
+  },
+  "scanner": {
+    "last_scan_at": "2026-02-16T21:00:00Z",
+    "next_scan_at": "2026-02-16T21:30:00Z",
+    "next_scan_in_seconds": 598,
+    "last_scan_added": 1,
+    "last_scan_error": null
+  },
+  "cleanup": {
+    "last_cleanup_at": "2026-02-16T00:10:00Z",
+    "next_cleanup_at": "2026-02-17T00:10:00Z",
+    "next_cleanup_in_seconds": 10234,
+    "last_cleanup_deleted": 4,
+    "last_cleanup_error": null
+  },
+  "workers": {
+    "downloader": {
+      "last_heartbeat": "2026-02-16T21:20:01Z",
+      "active_video_id": "dQw4w9WgXcQ",
+      "heartbeat_age_seconds": 2
+    }
+  }
+}
+```
+
+### `GET /metrics`
+Prometheus-style text metrics.
+
+**Response:** `200 OK` (`text/plain`)
+```text
+ytplex_queue_items{status="pending"} 2
+ytplex_queue_items{status="failed"} 1
+ytplex_next_scan_in_seconds 598
+ytplex_worker_heartbeat_age_seconds{worker="scanner"} 3
+ytplex_worker_active{worker="downloader"} 1
+ytplex_uptime_seconds 4800
+```
 
 ## Sources
 
@@ -23,6 +127,8 @@ Returns all configured sources.
     "title_exclude": "regex",
     "description_include": "regex",
     "description_exclude": "regex",
+    "min_minutes": 5,
+    "max_minutes": 60,
     "retention_days": 30
   }
 ]
@@ -41,10 +147,22 @@ Add a new channel. Resolves the channel name via yt-dlp, fetches the most recent
   "title_exclude": "regex",
   "description_include": "regex",
   "description_exclude": "regex",
+  "min_minutes": 5,
+  "max_minutes": 60,
   "retention_days": 30
 }
 ```
 Only `url` is required. `latest` defaults to 1 (number of recent videos to queue on add).
+
+Validation rules:
+- `url`: required, `http://` or `https://`, max 500 chars
+- `latest`: `1..200`
+- `min_minutes`/`max_minutes`: `1..1440` and `min_minutes <= max_minutes`
+- `retention_days`: `1..3650`
+- regex fields (`title_*`, `description_*`):
+  - max 200 chars
+  - must compile
+  - disallow backreferences, lookarounds, and nested quantified groups
 
 **Response:** `200 OK`
 ```json
@@ -59,6 +177,32 @@ Only `url` is required. `latest` defaults to 1 (number of recent videos to queue
 **Errors:**
 - `400` — invalid URL or could not resolve
 - `409` — source already exists
+
+### `PUT /api/sources/{index}`
+Edit a source's filters and retention. Only provided fields are updated; `null` or empty string clears the field. `url`, `name`, and `start_after` are not editable.
+
+**Request body** (all fields optional — omit a field to leave it unchanged):
+```json
+{
+  "title_include": "regex",
+  "title_exclude": null,
+  "description_include": "regex",
+  "description_exclude": null,
+  "min_minutes": 5,
+  "max_minutes": null,
+  "retention_days": 30
+}
+```
+
+**Response:** `200 OK` — returns the updated source object.
+
+**Errors:**
+- `404` — index out of range
+
+Validation rules:
+- `min_minutes`/`max_minutes`: `1..1440` and `min_minutes <= max_minutes`
+- `retention_days`: `1..3650`
+- regex fields: same safety rules as `POST /api/sources`
 
 ### `DELETE /api/sources/{index}?delete_files=true`
 Remove a source by its array index. Optionally delete downloaded files and mark queue entries as deleted.
@@ -77,7 +221,7 @@ Remove a source by its array index. Optionally delete downloaded files and mark 
 ## Queue
 
 ### `GET /api/queue`
-Returns the parsed queue (from `data/queue.md`).
+Returns the parsed queue (from `data/queue.db`).
 
 **Response:** `200 OK`
 ```json
@@ -94,6 +238,27 @@ Returns the parsed queue (from `data/queue.md`).
 ]
 ```
 Status is one of: `pending`, `downloading`, `processing`, `done`, `download_failed`, `process_failed`, `deleted`.
+
+### `GET /api/queue/events?limit=100`
+Returns recent queue transition events (newest first).
+
+Validation rules:
+- `limit`: `1..1000`
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 123,
+    "video_id": "dQw4w9WgXcQ",
+    "at": "2026-02-16T21:00:00Z",
+    "actor": "downloader",
+    "from_status": "pending",
+    "to_status": "downloading",
+    "message": "Claimed for download"
+  }
+]
+```
 
 ### `POST /api/scan-now`
 Trigger an immediate scan of all sources.
@@ -144,12 +309,12 @@ Returns current effective values for all settings (settings.json > env vars > de
 **Response:** `200 OK`
 ```json
 {
-  "scan_interval": 360,
+  "scan_interval": 30,
   "sleep_between_downloads": 5,
   "sponsorblock": true,
   "preferred_resolution": "1080p",
   "output_template": "%(channel)s/%(id)s/%(title)s.%(ext)s",
-  "retention_days": 14,
+  "retention_days": 7,
   "gemini_api_key": "",
   "downloads_host_path": ""
 }
@@ -170,4 +335,13 @@ Update one or more settings. Partial updates accepted — only provided keys are
 **Response:** `200 OK` — returns the full settings object (same shape as GET).
 
 **Errors:**
-- `400` — invalid value for a setting key, or no valid settings provided
+- `400` — invalid payload or no valid settings provided
+
+Validation rules:
+- `scan_interval`: `1..1440`
+- `sleep_between_downloads`: `0..3600`
+- `preferred_resolution`: one of `360p|480p|720p|1080p`
+- `output_template`: non-empty, max 500 chars
+- `retention_days`: `1..3650`
+- `gemini_api_key`: max 512 chars
+- `downloads_host_path`: max 1024 chars
