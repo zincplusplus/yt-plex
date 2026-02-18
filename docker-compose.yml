@@ -1,8 +1,8 @@
 services:
-  yt-plex-mini:
+  yt-plex-mini-api:
     build: .
     image: yt-plex-mini:latest
-    container_name: yt-plex-mini
+    container_name: yt-plex-mini-api
     restart: unless-stopped
     ports:
       - "${PORT:-8081}:8080"
@@ -11,16 +11,39 @@ services:
       - ${DOWNLOADS_DIR:-./downloads}:/downloads
     environment:
       - DOWNLOADS_DIR=/downloads
-      - SCAN_INTERVAL=${SCAN_INTERVAL:-360}
+      - SCAN_INTERVAL=${SCAN_INTERVAL:-30}
       - SLEEP_BETWEEN_DOWNLOADS=${SLEEP_BETWEEN_DOWNLOADS:-5}
       - SPONSORBLOCK=${SPONSORBLOCK:-true}
       - PREFERRED_RESOLUTION=${PREFERRED_RESOLUTION:-1080p}
-      - RETENTION_DAYS=${RETENTION_DAYS:-14}
+      - RETENTION_DAYS=${RETENTION_DAYS:-7}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - DOWNLOADS_HOST_PATH=${DOWNLOADS_HOST_PATH:-}
+      - YT_PLEX_ADMIN_KEY=${YT_PLEX_ADMIN_KEY:-}
+      - YT_PLEX_OPERATOR_KEY=${YT_PLEX_OPERATOR_KEY:-}
+      - RUN_API=true
+      - RUN_WORKERS=false
+
+  yt-plex-mini-worker:
+    image: yt-plex-mini:latest
+    container_name: yt-plex-mini-worker
+    restart: unless-stopped
+    depends_on:
+      - yt-plex-mini-api
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+      - ${DOWNLOADS_DIR:-./downloads}:/downloads
+    environment:
+      - DOWNLOADS_DIR=/downloads
+      - SCAN_INTERVAL=${SCAN_INTERVAL:-30}
+      - SLEEP_BETWEEN_DOWNLOADS=${SLEEP_BETWEEN_DOWNLOADS:-5}
+      - SPONSORBLOCK=${SPONSORBLOCK:-true}
+      - PREFERRED_RESOLUTION=${PREFERRED_RESOLUTION:-1080p}
+      - RETENTION_DAYS=${RETENTION_DAYS:-7}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - RUN_API=false
+      - RUN_WORKERS=true
 
 x-casaos:
-  main: yt-plex-mini
+  main: yt-plex-mini-api
   store_app_id: yt-plex-mini
   title:
     en_us: yt-plex mini

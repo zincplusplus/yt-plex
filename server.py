@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 from typing import Any
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -23,8 +23,17 @@ from videoqueue import (
     prioritize_pending,
     get_queue_events,
     retry_failed,
+    get_dead_letter,
+    bulk_retry_failed,
+    bulk_mark_deleted,
 )
-from scanner import load_sources, save_sources
+from scanner import (
+    load_sources,
+    upsert_source,
+    delete_source as delete_source_row,
+    find_source_by_url,
+    resolve_source_identifier,
+)
 import settings
 
 logger = logging.getLogger(__name__)
@@ -49,8 +58,9 @@ SCAN_INTERVAL_MAX_MIN = 1440
 SLEEP_BETWEEN_MAX_SEC = 3600
 OUTPUT_TEMPLATE_MAX_LEN = 500
 GEMINI_KEY_MAX_LEN = 512
-DOWNLOADS_HOST_PATH_MAX_LEN = 1024
 _RESOLUTIONS = {"360p", "480p", "720p", "1080p"}
+AUTH_ADMIN_KEY = os.getenv("YT_PLEX_ADMIN_KEY", "").strip()
+AUTH_OPERATOR_KEY = os.getenv("YT_PLEX_OPERATOR_KEY", "").strip()
 
 _RE_BACKREF = re.compile(r"\\[1-9]")
 _RE_LOOKAROUND = re.compile(r"\(\?([=!]|<[=!])")
@@ -74,6 +84,47 @@ def _http_error(status_code: int, code: str, message: str):
         status_code=status_code,
         detail={"code": code, "message": message},
     )
+
+
+def _extract_api_key(req: Request) -> str:
+    authz = req.headers.get("authorization", "")
+    if authz.lower().startswith("bearer "):
+        return authz[7:].strip()
+    return req.headers.get("x-api-key", "").strip()
+
+
+def _require_role(req: Request, required: str) -> str:
+    # Backward-compatible local mode when no keys are configured.
+    if not AUTH_ADMIN_KEY and not AUTH_OPERATOR_KEY:
+        return "anonymous"
+
+    token = _extract_api_key(req)
+    if not token:
+        _http_error(401, "auth_required", "Authentication required")
+
+    role = None
+    if AUTH_ADMIN_KEY and token == AUTH_ADMIN_KEY:
+        role = "admin"
+    elif AUTH_OPERATOR_KEY and token == AUTH_OPERATOR_KEY:
+        role = "operator"
+
+    if not role:
+        _http_error(401, "invalid_token", "Invalid API token")
+    if required == "admin" and role != "admin":
+        _http_error(403, "forbidden", "Admin role required")
+    return role
+
+
+def _actor(req: Request, fallback: str = "api") -> str:
+    raw = req.headers.get("x-actor", "").strip()
+    if not raw:
+        return fallback
+    return raw[:64]
+
+
+def _audit(action: str, actor: str, **fields: Any):
+    payload: dict[str, Any] = {"event": "api_audit", "action": action, "actor": actor, **fields}
+    logger.info(json.dumps(payload, sort_keys=True, ensure_ascii=True))
 
 
 def _validate_safe_regex(field_name: str, pattern: str | None) -> str | None:
@@ -126,6 +177,22 @@ def _seconds_until(ts: str | None) -> int | None:
         return None
     now = datetime.now(timezone.utc)
     return max(0, int((dt - now).total_seconds()))
+
+
+def _next_scan_seconds(scanner: dict) -> int | None:
+    # Prefer explicit scheduler deadline from worker loop.
+    explicit = _seconds_until(scanner.get("next_scan_at"))
+    if explicit is not None:
+        return explicit
+
+    # Fallback: derive from last completed scan + scan_interval.
+    last_scan = _parse_iso_utc(scanner.get("last_scan_at"))
+    if not last_scan:
+        return None
+    interval_min = int(settings.get("scan_interval", str(_ENV_DEFAULTS["scan_interval"])))
+    next_dt = last_scan + timedelta(minutes=interval_min)
+    now = datetime.now(timezone.utc)
+    return max(0, int((next_dt - now).total_seconds()))
 
 
 def _queue_counts() -> dict[str, int]:
@@ -243,7 +310,7 @@ async def system_status():
         "queue": queue,
         "scanner": {
             **scanner,
-            "next_scan_in_seconds": _seconds_until(scanner.get("next_scan_at")),
+            "next_scan_in_seconds": _next_scan_seconds(scanner),
         },
         "cleanup": {
             **cleanup,
@@ -264,7 +331,7 @@ async def metrics():
     for status, count in queue.items():
         lines.append(f'ytplex_queue_items{{status="{status}"}} {count}')
 
-    next_scan = _seconds_until(scanner.get("next_scan_at"))
+    next_scan = _next_scan_seconds(scanner)
     if next_scan is not None:
         lines.append(f"ytplex_next_scan_in_seconds {next_scan}")
 
@@ -290,6 +357,8 @@ async def metrics():
 class AddSourceRequest(BaseModel):
     url: str = Field(min_length=1, max_length=500)
     latest: int = Field(default=1, ge=1, le=200)
+    sponsorblock: bool | None = None
+    gemini_fallback: bool | None = None
     title_include: str | None = Field(default=None, max_length=SAFE_REGEX_MAX_LEN)
     title_exclude: str | None = Field(default=None, max_length=SAFE_REGEX_MAX_LEN)
     description_include: str | None = Field(default=None, max_length=SAFE_REGEX_MAX_LEN)
@@ -331,16 +400,14 @@ async def get_sources():
 
 
 @app.post("/api/sources")
-async def add_source(req: AddSourceRequest):
+async def add_source(req: AddSourceRequest, request: Request):
     """Add a channel. Fetches last N videos, queues them, sets start_after."""
+    role = _require_role(request, "operator")
     url = req.url
 
-    sources = load_sources()
-
-    # Check for duplicates early
-    for s in sources:
-        if s["url"] == url:
-            _http_error(409, "source_exists", "Source already exists")
+    # Check duplicates early by URL.
+    if find_source_by_url(url):
+        _http_error(409, "source_exists", "Source already exists")
 
     try:
         from scanner import add_source_with_videos
@@ -364,13 +431,16 @@ async def add_source(req: AddSourceRequest):
     except Exception as e:
         _http_error(400, "source_resolve_failed", f"Could not resolve URL: {e}")
 
-    # Re-check for duplicates (resolved URL may differ)
-    sources = load_sources()
-    for s in sources:
-        if s["url"] == source["url"]:
-            _http_error(409, "source_exists", "Source already exists")
+    # Re-check duplicates after URL resolution.
+    existing = find_source_by_url(source["url"])
+    if existing:
+        _http_error(409, "source_exists", "Source already exists")
 
     # Add optional filters
+    if req.sponsorblock is not None:
+        source["sponsorblock"] = req.sponsorblock
+    if req.gemini_fallback is not None:
+        source["gemini_fallback"] = req.gemini_fallback
     if req.title_include:
         source["title_include"] = req.title_include
     if req.title_exclude:
@@ -386,14 +456,15 @@ async def add_source(req: AddSourceRequest):
     if req.retention_days is not None:
         source["retention_days"] = req.retention_days
 
-    sources.append(source)
-    sources.sort(key=lambda s: s.get("name", "").lower())
-    save_sources(sources)
+    source = upsert_source(source)
+    _audit("source_add", _actor(request, role), url=source.get("url"), queued=queued)
 
     return {**source, "queued": queued}
 
 
 class EditSourceRequest(BaseModel):
+    sponsorblock: bool | None = None
+    gemini_fallback: bool | None = None
     title_include: str | None = Field(default=None, max_length=SAFE_REGEX_MAX_LEN)
     title_exclude: str | None = Field(default=None, max_length=SAFE_REGEX_MAX_LEN)
     description_include: str | None = Field(default=None, max_length=SAFE_REGEX_MAX_LEN)
@@ -421,14 +492,14 @@ class EditSourceRequest(BaseModel):
         return self
 
 
-@app.put("/api/sources/{index}")
-async def edit_source(index: int, req: EditSourceRequest):
-    sources = load_sources()
-    if index < 0 or index >= len(sources):
+@app.put("/api/sources/{source_id}")
+async def edit_source(source_id: str, req: EditSourceRequest, request: Request):
+    role = _require_role(request, "operator")
+    source = resolve_source_identifier(source_id)
+    if not source:
         _http_error(404, "source_not_found", "Source not found")
 
-    source = sources[index]
-    editable = ["title_include", "title_exclude", "description_include",
+    editable = ["sponsorblock", "gemini_fallback", "title_include", "title_exclude", "description_include",
                 "description_exclude", "min_minutes", "max_minutes",
                 "retention_days"]
 
@@ -441,18 +512,20 @@ async def edit_source(index: int, req: EditSourceRequest):
         else:
             source[field] = value
 
-    sources.sort(key=lambda s: s.get("name", "").lower())
-    save_sources(sources)
-    return source
+    updated = upsert_source(source)
+    _audit("source_edit", _actor(request, role), source_id=updated.get("id"), name=updated.get("name"))
+    return updated
 
 
-@app.delete("/api/sources/{index}")
-async def delete_source(index: int, delete_files: bool = False):
-    sources = load_sources()
-    if index < 0 or index >= len(sources):
+@app.delete("/api/sources/{source_id}")
+async def delete_source(source_id: str, request: Request, delete_files: bool = False):
+    role = _require_role(request, "admin")
+    source = resolve_source_identifier(source_id)
+    if not source:
         _http_error(404, "source_not_found", "Source not found")
-    removed = sources.pop(index)
-    save_sources(sources)
+    removed = delete_source_row(source["id"])
+    if not removed:
+        _http_error(404, "source_not_found", "Source not found")
 
     name = removed.get("name", "")
     files_deleted = 0
@@ -466,7 +539,16 @@ async def delete_source(index: int, delete_files: bool = False):
 
         for entry in parse_queue():
             if entry["channel"] == name and entry["status"] in ("pending", "done", "download_failed", "process_failed"):
-                await mark_deleted(entry["video_id"])
+                await mark_deleted(entry["video_id"], actor="api")
+
+    _audit(
+        "source_delete",
+        _actor(request, role),
+        source_id=removed.get("id"),
+        source=name,
+        delete_files=bool(delete_files),
+        files_deleted=files_deleted,
+    )
 
     return {"removed": removed, "files_deleted": files_deleted}
 
@@ -488,35 +570,105 @@ async def queue_events(limit: int = 100):
     return get_queue_events(limit)
 
 
+@app.get("/api/queue/dead-letter")
+async def queue_dead_letter(
+    limit: int = 200,
+    status: str | None = None,
+    channel: str | None = None,
+    q: str | None = None,
+):
+    if limit < 1 or limit > 1000:
+        _http_error(400, "invalid_limit", "limit must be between 1 and 1000")
+    if status and status not in ("download_failed", "process_failed"):
+        _http_error(400, "invalid_status", "status must be download_failed or process_failed")
+    return get_dead_letter(limit=limit, status=status, channel=channel, query=q)
+
+
 @app.post("/api/scan-now")
-async def scan_now():
+async def scan_now(request: Request):
     """Trigger an immediate scan of all sources."""
+    role = _require_role(request, "operator")
     from scanner import scan_all
     loop = asyncio.get_running_loop()
     added = await loop.run_in_executor(None, scan_all)
+    _audit("scan_now", _actor(request, role), added=added)
     return {"added": added}
 
 
+class BulkQueueAction(BaseModel):
+    video_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+@app.post("/api/queue/bulk/retry")
+async def bulk_retry(req: BulkQueueAction, request: Request):
+    role = _require_role(request, "operator")
+    actor = _actor(request, role)
+    ids = list(dict.fromkeys(v.strip() for v in req.video_ids if v and v.strip()))
+    if not ids:
+        _http_error(400, "empty_video_ids", "video_ids must contain at least one value")
+    results = bulk_retry_failed(ids, actor=actor)
+    ok_count = sum(1 for r in results if r["ok"])
+    _audit("bulk_retry", actor, requested=len(ids), succeeded=ok_count)
+    return {"requested": len(ids), "succeeded": ok_count, "results": results}
+
+
+@app.post("/api/queue/bulk/delete")
+async def bulk_delete(req: BulkQueueAction, request: Request):
+    role = _require_role(request, "admin")
+    actor = _actor(request, role)
+    ids = list(dict.fromkeys(v.strip() for v in req.video_ids if v and v.strip()))
+    if not ids:
+        _http_error(400, "empty_video_ids", "video_ids must contain at least one value")
+
+    deleted_files = 0
+    for vid in ids:
+        if _delete_video_files(vid):
+            deleted_files += 1
+    results = bulk_mark_deleted(ids, actor=actor)
+    ok_count = sum(1 for r in results if r["ok"])
+    _audit(
+        "bulk_delete",
+        actor,
+        requested=len(ids),
+        succeeded=ok_count,
+        files_deleted=deleted_files,
+    )
+    return {
+        "requested": len(ids),
+        "succeeded": ok_count,
+        "files_deleted": deleted_files,
+        "results": results,
+    }
+
+
 @app.post("/api/queue/{video_id}/download-now")
-async def download_now(video_id: str):
+async def download_now(video_id: str, request: Request):
     """Move a pending video to the top of the queue for immediate download."""
-    if prioritize_pending(video_id, actor="api"):
+    role = _require_role(request, "operator")
+    actor = _actor(request, role)
+    if prioritize_pending(video_id, actor=actor):
+        _audit("queue_prioritize", actor, video_id=video_id)
         return {"queued": video_id}
     _http_error(404, "pending_video_not_found", "Pending video not found")
 
 
 @app.post("/api/queue/{video_id}/retry")
-async def retry_video(video_id: str):
+async def retry_video(video_id: str, request: Request):
     """Retry a failed video. [!] -> [ ], [e] -> [p]."""
-    new_status = retry_failed(video_id, actor="api")
+    role = _require_role(request, "operator")
+    actor = _actor(request, role)
+    new_status = retry_failed(video_id, actor=actor)
     if new_status:
+        _audit("queue_retry", actor, video_id=video_id, new_status=new_status)
         return {"retried": video_id, "new_status": new_status}
     _http_error(404, "failed_video_not_found", "Failed video not found")
 
 
 @app.delete("/api/queue/{video_id}")
-async def delete_video(video_id: str):
+async def delete_video(video_id: str, request: Request):
     """Delete a video's files and mark as deleted."""
+    role = _require_role(request, "admin")
+    actor = _actor(request, role)
     entries = parse_queue()
     found = False
     for e in entries:
@@ -530,7 +682,8 @@ async def delete_video(video_id: str):
     # Delete files
     _delete_video_files(video_id)
 
-    await mark_deleted(video_id)
+    await mark_deleted(video_id, actor=actor)
+    _audit("queue_delete", actor, video_id=video_id)
     return {"deleted": video_id}
 
 
@@ -545,7 +698,6 @@ _ENV_DEFAULTS = {
         "%(channel)s/%(id)s/%(title)s.%(ext)s"),
     "retention_days": int(os.getenv("RETENTION_DAYS", "7")),
     "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
-    "downloads_host_path": os.getenv("DOWNLOADS_HOST_PATH", ""),
 }
 
 _SETTINGS_TYPES = {
@@ -556,7 +708,6 @@ _SETTINGS_TYPES = {
     "output_template": str,
     "retention_days": int,
     "gemini_api_key": str,
-    "downloads_host_path": str,
 }
 
 
@@ -581,7 +732,6 @@ class SettingsUpdateRequest(BaseModel):
     output_template: str | None = Field(default=None, min_length=1, max_length=OUTPUT_TEMPLATE_MAX_LEN)
     retention_days: int | None = Field(default=None, ge=1, le=SETTINGS_RETENTION_MAX_DAYS)
     gemini_api_key: str | None = Field(default=None, max_length=GEMINI_KEY_MAX_LEN)
-    downloads_host_path: str | None = Field(default=None, max_length=DOWNLOADS_HOST_PATH_MAX_LEN)
 
     model_config = {"extra": "forbid"}
 
@@ -605,7 +755,7 @@ class SettingsUpdateRequest(BaseModel):
             raise ValueError("output_template cannot be empty")
         return value
 
-    @field_validator("gemini_api_key", "downloads_host_path")
+    @field_validator("gemini_api_key")
     @classmethod
     def strip_optional_text(cls, v: str | None) -> str | None:
         if v is None:
@@ -614,9 +764,11 @@ class SettingsUpdateRequest(BaseModel):
 
 
 @app.put("/api/settings")
-async def update_settings(req: SettingsUpdateRequest):
+async def update_settings(req: SettingsUpdateRequest, request: Request):
+    role = _require_role(request, "admin")
     updates = req.model_dump(exclude_none=True)
     if not updates:
         _http_error(400, "no_settings_provided", "No valid settings provided")
     settings.save(updates)
+    _audit("settings_update", _actor(request, role), keys=sorted(updates.keys()))
     return await get_settings()

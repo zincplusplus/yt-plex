@@ -6,17 +6,19 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
 
 import settings
+import runtime_state
 from videoqueue import (
-    parse_queue, get_pending, get_by_status, queue_lock,
-    mark_downloading, mark_processing, mark_done, mark_deleted,
-    mark_failed, mark_pending, mark_process_failed, reset_interrupted,
+    parse_queue, get_by_status, claim_next_pending,
+    mark_deleted, reset_interrupted,
+    record_download_success, record_download_failure,
+    record_process_success, record_process_failure,
 )
 
 load_dotenv()
@@ -28,47 +30,138 @@ logging.basicConfig(
 )
 logger = logging.getLogger("yt-plex")
 
-DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "./downloads")
+DOWNLOADS_DIR = Path(os.getenv("DOWNLOADS_DIR", "./downloads"))
 DATA_DIR = Path("data")
 SOURCES_FILE = DATA_DIR / "sources.json"
 
 ENV_DEFAULTS = {
-    "scan_interval": os.getenv("SCAN_INTERVAL", "360"),
+    "scan_interval": os.getenv("SCAN_INTERVAL", "30"),
     "sleep_between_downloads": os.getenv("SLEEP_BETWEEN_DOWNLOADS", "5"),
     "sponsorblock": os.getenv("SPONSORBLOCK", "true"),
     "preferred_resolution": os.getenv("PREFERRED_RESOLUTION", "1080p"),
     "output_template": os.getenv("OUTPUT_TEMPLATE",
         "%(channel)s/%(id)s/%(title)s.%(ext)s"),
-    "retention_days": os.getenv("RETENTION_DAYS", "14"),
+    "retention_days": os.getenv("RETENTION_DAYS", "7"),
     "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
 }
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _in_seconds_iso(seconds: int) -> str:
+    return (
+        datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _from_ts_iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _log_event(level: int, event: str, **fields):
+    payload = {"event": event, **fields}
+    logger.log(level, json.dumps(payload, sort_keys=True, ensure_ascii=True))
+
+
+def _coerce_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _source_sponsorblock_enabled(channel: str, default: bool) -> bool:
+    """Return per-source sponsorblock override for a channel, else default."""
+    try:
+        from scanner import load_sources
+        needle = (channel or "").strip().casefold()
+        if not needle:
+            return default
+        for source in load_sources():
+            name = str(source.get("name", "")).strip().casefold()
+            if name == needle and "sponsorblock" in source:
+                return _coerce_bool(source.get("sponsorblock"), default)
+    except Exception:
+        pass
+    return default
+
+
+def _source_gemini_fallback_enabled(channel: str, default: bool) -> bool:
+    """Return per-source Gemini fallback override for a channel, else default."""
+    try:
+        from scanner import load_sources
+        needle = (channel or "").strip().casefold()
+        if not needle:
+            return default
+        for source in load_sources():
+            name = str(source.get("name", "")).strip().casefold()
+            if name == needle and "gemini_fallback" in source:
+                return _coerce_bool(source.get("gemini_fallback"), default)
+    except Exception:
+        pass
+    return default
+
+
 async def scanner_loop():
     """Periodically scan all sources for new videos."""
-    from scanner import scan_all
+    from scanner import scan_all, get_sources_revision
 
     while True:
+        scan_interval = int(settings.get("scan_interval", ENV_DEFAULTS["scan_interval"]))
+        cycle_started = time.time()
+        deadline = cycle_started + scan_interval * 60
+        runtime_state.set_component("scanner", next_scan_at=_from_ts_iso(deadline))
+        runtime_state.touch_worker("scanner")
+        runtime_state.set_component(
+            "scanner",
+            is_scanning=True,
+            scan_started_at=_utcnow_iso(),
+        )
         try:
             loop = asyncio.get_running_loop()
             added = await loop.run_in_executor(None, scan_all)
+            runtime_state.set_component(
+                "scanner",
+                last_scan_at=_utcnow_iso(),
+                last_scan_added=added,
+                last_scan_error=None,
+                is_scanning=False,
+                scan_started_at=None,
+            )
             if added:
-                logger.info(f"Scanner: {added} new videos queued")
+                _log_event(logging.INFO, "scan_complete", added=added)
         except Exception as e:
-            logger.error(f"Scanner error: {e}")
+            runtime_state.set_component(
+                "scanner",
+                last_scan_at=_utcnow_iso(),
+                last_scan_error=str(e),
+                is_scanning=False,
+                scan_started_at=None,
+            )
+            _log_event(logging.ERROR, "scan_error", error=str(e))
 
-        # Sleep, but wake early if sources.json changes
-        scan_interval = int(settings.get("scan_interval", ENV_DEFAULTS["scan_interval"]))
-        last_mtime = SOURCES_FILE.stat().st_mtime if SOURCES_FILE.exists() else 0
-        deadline = time.time() + scan_interval * 60
+        # Sleep until next cadence tick, but wake early if sources.json changes
+        last_rev = get_sources_revision()
         while time.time() < deadline:
             await asyncio.sleep(10)
+            runtime_state.touch_worker("scanner")
             try:
-                current_mtime = SOURCES_FILE.stat().st_mtime if SOURCES_FILE.exists() else 0
-                if current_mtime > last_mtime:
-                    logger.info("sources.json changed — triggering scan")
+                current_rev = get_sources_revision()
+                if current_rev != last_rev:
+                    runtime_state.set_component("scanner", next_scan_at=_utcnow_iso())
+                    _log_event(logging.INFO, "scan_triggered", reason="sources_changed")
                     break
-                last_mtime = current_mtime
+                last_rev = current_rev
             except OSError:
                 pass
 
@@ -79,23 +172,22 @@ async def download_loop():
 
     # Reset any interrupted downloads on startup
     await reset_interrupted()
-
-    fail_counts: dict[str, int] = {}
+    runtime_state.touch_worker("downloader")
 
     while True:
-        pending = get_pending()
-        if not pending:
+        runtime_state.touch_worker("downloader")
+        entry = claim_next_pending(actor="downloader")
+        if not entry:
             await asyncio.sleep(5)
             continue
 
-        entry = pending[0]
         vid = entry["video_id"]
+        runtime_state.set_worker("downloader", active_video_id=vid)
+        _log_event(logging.INFO, "download_claimed", video_id=vid)
 
         resolution = settings.get("preferred_resolution", ENV_DEFAULTS["preferred_resolution"])
         output_template = settings.get("output_template", ENV_DEFAULTS["output_template"])
         sleep_between = int(settings.get("sleep_between_downloads", ENV_DEFAULTS["sleep_between_downloads"]))
-
-        await mark_downloading(vid)
 
         try:
             loop = asyncio.get_running_loop()
@@ -104,43 +196,46 @@ async def download_loop():
             )
 
             if result["success"]:
-                logger.info(f"Downloaded: {result.get('title')} -> {result.get('file_path')}")
-                await mark_processing(vid)
-                fail_counts.pop(vid, None)
+                _log_event(
+                    logging.INFO,
+                    "download_complete",
+                    video_id=vid,
+                    title=result.get("title"),
+                    file_path=result.get("file_path"),
+                )
+                record_download_success(vid)
             else:
-                logger.error(f"Download failed for {vid}: {result.get('error')}")
-                fail_counts[vid] = fail_counts.get(vid, 0) + 1
-                if fail_counts[vid] >= 3:
-                    logger.warning(f"Marking {vid} as failed after 3 consecutive failures")
-                    await mark_failed(vid)
-                    fail_counts.pop(vid, None)
-                else:
-                    await mark_pending(vid)
+                _log_event(
+                    logging.ERROR,
+                    "download_failed",
+                    video_id=vid,
+                    error=result.get("error"),
+                )
+                new_status = record_download_failure(vid, result.get("error", "download failed"))
+                if new_status == "download_failed":
+                    _log_event(logging.WARNING, "download_marked_failed", video_id=vid, attempts=3)
                 if result.get("rate_limited"):
-                    logger.warning("Rate limited — backing off")
+                    _log_event(logging.WARNING, "download_rate_limited", video_id=vid)
                 await asyncio.sleep(60)
 
         except Exception as e:
-            logger.error(f"Download error for {vid}: {e}")
-            fail_counts[vid] = fail_counts.get(vid, 0) + 1
-            if fail_counts[vid] >= 3:
-                logger.warning(f"Marking {vid} as failed after 3 consecutive failures")
-                await mark_failed(vid)
-                fail_counts.pop(vid, None)
-            else:
-                await mark_pending(vid)
+            _log_event(logging.ERROR, "download_error", video_id=vid, error=str(e))
+            new_status = record_download_failure(vid, str(e))
+            if new_status == "download_failed":
+                _log_event(logging.WARNING, "download_marked_failed", video_id=vid, attempts=3)
             await asyncio.sleep(60)
+        finally:
+            runtime_state.set_worker("downloader", active_video_id=None)
 
         await asyncio.sleep(sleep_between)
 
 
 async def post_process_loop():
     """Watch for [p] processing entries, post-process them one at a time."""
-    from postprocessor import post_process_one
-
-    fail_counts: dict[str, int] = {}
+    from processor import post_process_one
 
     while True:
+        runtime_state.touch_worker("processor")
         processing = get_by_status("processing")
         if not processing:
             await asyncio.sleep(5)
@@ -148,38 +243,70 @@ async def post_process_loop():
 
         entry = processing[0]
         vid = entry["video_id"]
+        runtime_state.set_worker("processor", active_video_id=vid)
+        _log_event(logging.INFO, "process_claimed", video_id=vid)
 
         sponsorblock = settings.get("sponsorblock", ENV_DEFAULTS["sponsorblock"])
-        use_sponsorblock = str(sponsorblock).lower() == "true"
+        global_sponsorblock = _coerce_bool(sponsorblock, True)
+        use_sponsorblock = _source_sponsorblock_enabled(entry.get("channel", ""), global_sponsorblock)
         gemini_api_key = settings.get("gemini_api_key", ENV_DEFAULTS["gemini_api_key"])
+        global_gemini_enabled = bool((gemini_api_key or "").strip())
+        use_gemini_fallback = _source_gemini_fallback_enabled(entry.get("channel", ""), global_gemini_enabled)
+        effective_gemini_key = gemini_api_key if use_gemini_fallback else ""
 
         try:
-            success = await post_process_one(vid, DOWNLOADS_DIR, use_sponsorblock, gemini_api_key)
+            success = await post_process_one(vid, DOWNLOADS_DIR, use_sponsorblock, effective_gemini_key)
             if success:
-                await mark_done(vid)
-                fail_counts.pop(vid, None)
-                logger.info(f"Post-processing complete: {vid}")
+                record_process_success(vid)
+                _log_event(logging.INFO, "process_complete", video_id=vid)
             else:
-                fail_counts[vid] = fail_counts.get(vid, 0) + 1
-                if fail_counts[vid] >= 3:
-                    logger.warning(f"Marking {vid} as process_failed after 3 failures")
-                    await mark_process_failed(vid)
-                    fail_counts.pop(vid, None)
+                new_status = record_process_failure(vid, "post-process returned false")
+                if new_status == "process_failed":
+                    _log_event(logging.WARNING, "process_marked_failed", video_id=vid, attempts=3)
                 await asyncio.sleep(30)
         except Exception as e:
-            logger.error(f"Post-process error for {vid}: {e}")
-            fail_counts[vid] = fail_counts.get(vid, 0) + 1
-            if fail_counts[vid] >= 3:
-                logger.warning(f"Marking {vid} as process_failed after 3 failures")
-                await mark_process_failed(vid)
-                fail_counts.pop(vid, None)
+            _log_event(logging.ERROR, "process_error", video_id=vid, error=str(e))
+            new_status = record_process_failure(vid, str(e))
+            if new_status == "process_failed":
+                _log_event(logging.WARNING, "process_marked_failed", video_id=vid, attempts=3)
             await asyncio.sleep(30)
+        finally:
+            runtime_state.set_worker("processor", active_video_id=None)
+
+
+_VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts"}
+
+
+def _find_video_dir(video_id: str) -> Path | None:
+    """Locate the download folder for a video_id, or None."""
+    if not DOWNLOADS_DIR.exists():
+        return None
+    for channel_dir in DOWNLOADS_DIR.iterdir():
+        if not channel_dir.is_dir():
+            continue
+        video_dir = channel_dir / video_id
+        if video_dir.exists() and video_dir.is_dir():
+            return video_dir
+    return None
+
+
+def _has_video_file(video_dir: Path) -> bool:
+    """Check if a folder contains any video files."""
+    return any(f.suffix.lower() in _VIDEO_EXTS for f in video_dir.iterdir() if f.is_file())
 
 
 async def cleanup_loop():
-    """Periodically delete files older than retention_days, mark [d]."""
+    """Periodically clean up done videos.
+
+    Two passes:
+    1. Orphan cleanup — if Plex deleted the video file but left the folder,
+       remove the folder and mark [d].
+    2. Retention cleanup — delete videos older than retention_days.
+    """
 
     while True:
+        runtime_state.touch_worker("cleanup")
+        deleted_count = 0
         try:
             global_retention = int(settings.get("retention_days", ENV_DEFAULTS["retention_days"]))
 
@@ -197,13 +324,26 @@ async def cleanup_loop():
                 retention_map[name] = days
 
             entries = parse_queue()
-            downloads = Path(DOWNLOADS_DIR)
             now = datetime.now()
 
             for entry in entries:
                 if entry["status"] != "done":
                     continue
 
+                vid = entry["video_id"]
+                video_dir = _find_video_dir(vid)
+
+                # Pass 1: orphan cleanup — folder missing or video file gone
+                if not video_dir or not _has_video_file(video_dir):
+                    if video_dir:
+                        shutil.rmtree(video_dir)
+                        _log_event(logging.INFO, "cleanup_removed_empty_folder", path=str(video_dir))
+                    _log_event(logging.INFO, "cleanup_mark_deleted", video_id=vid, reason="orphan")
+                    await mark_deleted(vid)
+                    deleted_count += 1
+                    continue
+
+                # Pass 2: retention cleanup
                 retention = retention_map.get(entry["channel"], global_retention)
                 cutoff = now - timedelta(days=retention)
 
@@ -215,44 +355,49 @@ async def cleanup_loop():
                 if entry_date > cutoff:
                     continue
 
-                vid = entry["video_id"]
-                deleted = False
-                if downloads.exists():
-                    deleted_dirs = set()
-                    for f in downloads.rglob(f"*{vid}*"):
-                        if f.is_file():
-                            parent = f.parent
-                            if parent != downloads and parent.parent != downloads:
-                                if parent not in deleted_dirs:
-                                    shutil.rmtree(parent)
-                                    logger.info(f"Cleanup: deleted folder {parent}")
-                                    deleted_dirs.add(parent)
-                            else:
-                                f.unlink()
-                                logger.info(f"Cleanup: deleted {f}")
-                            deleted = True
+                if video_dir:
+                    shutil.rmtree(video_dir)
+                    _log_event(logging.INFO, "cleanup_retention_delete_folder", path=str(video_dir))
 
-                if deleted:
-                    await mark_deleted(vid)
-                    logger.info(f"Cleanup: marked {vid} as deleted")
+                await mark_deleted(vid)
+                _log_event(logging.INFO, "cleanup_mark_deleted", video_id=vid, reason="retention")
+                deleted_count += 1
 
         except Exception as e:
-            logger.error(f"Cleanup error: {e}")
+            runtime_state.set_component(
+                "cleanup",
+                last_cleanup_at=_utcnow_iso(),
+                last_cleanup_deleted=deleted_count,
+                last_cleanup_error=str(e),
+            )
+            _log_event(logging.ERROR, "cleanup_error", error=str(e))
+        else:
+            runtime_state.set_component(
+                "cleanup",
+                last_cleanup_at=_utcnow_iso(),
+                last_cleanup_deleted=deleted_count,
+                last_cleanup_error=None,
+            )
+            _log_event(logging.INFO, "cleanup_complete", deleted=deleted_count)
 
         # Run once per day
-        await asyncio.sleep(86400)
+        runtime_state.set_component("cleanup", next_cleanup_at=_in_seconds_iso(86400))
+        for _ in range(1440):
+            await asyncio.sleep(60)
+            runtime_state.touch_worker("cleanup")
 
 
 async def main():
     """Start all services."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    from server import app as web_app
-
-    config = uvicorn.Config(web_app, host="0.0.0.0", port=8080, log_level="info")
-    server = uvicorn.Server(config)
+    run_api = _env_bool("RUN_API", True)
+    run_workers = _env_bool("RUN_WORKERS", True)
+    if not run_api and not run_workers:
+        raise RuntimeError("At least one of RUN_API or RUN_WORKERS must be true")
 
     logger.info("Starting yt-plex")
+    logger.info(f"  Mode: api={run_api}, workers={run_workers}")
     logger.info(f"  Downloads: {DOWNLOADS_DIR}")
     logger.info(f"  Scan interval: {settings.get('scan_interval', ENV_DEFAULTS['scan_interval'])}min")
     logger.info(f"  SponsorBlock: {settings.get('sponsorblock', ENV_DEFAULTS['sponsorblock'])}")
@@ -261,14 +406,27 @@ async def main():
     gemini = settings.get("gemini_api_key", ENV_DEFAULTS["gemini_api_key"])
     logger.info(f"  Gemini fallback: {'enabled' if gemini else 'disabled'}")
 
-    await asyncio.gather(
-        server.serve(),
-        scanner_loop(),
-        download_loop(),
-        post_process_loop(),
-        cleanup_loop(),
-    )
+    tasks = []
+    if run_api:
+        from server import app as web_app
+        config = uvicorn.Config(web_app, host="0.0.0.0", port=8080, log_level="info")
+        server = uvicorn.Server(config)
+        tasks.append(server.serve())
+    if run_workers:
+        tasks.extend(
+            [
+                scanner_loop(),
+                download_loop(),
+                post_process_loop(),
+                cleanup_loop(),
+            ]
+        )
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("Shutting down")

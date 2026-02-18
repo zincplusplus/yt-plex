@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+required_doc="docs/CHANGES_PLAIN_ENGLISH.md"
+
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+if [[ -z "${staged_files}" ]]; then
+  exit 0
+fi
+
+code_changed=0
+doc_updated=0
+
+while IFS= read -r file; do
+  [[ -z "${file}" ]] && continue
+
+  if [[ "${file}" == "${required_doc}" ]]; then
+    doc_updated=1
+  fi
+
+  case "${file}" in
+    docs/*|README.md|AGENTS.md|.githooks/*)
+      ;;
+    *)
+      code_changed=1
+      ;;
+  esac
+done <<< "${staged_files}"
+
+if [[ "${code_changed}" -eq 1 && "${doc_updated}" -eq 0 ]]; then
+  echo ""
+  echo "Commit blocked: code changes detected, but ${required_doc} was not updated."
+  echo "Add a short plain-English entry describing what changed and why."
+  echo ""
+  echo "Then stage it:"
+  echo "  git add ${required_doc}"
+  echo ""
+  exit 1
+fi
+
+exit 0

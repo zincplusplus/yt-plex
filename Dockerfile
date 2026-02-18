@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py scanner.py downloader.py postprocessor.py videoqueue.py server.py settings.py ./
+COPY main.py scanner.py downloader.py processor.py videoqueue.py server.py settings.py runtime_state.py ./
 COPY templates/ templates/
 
 ENV DOWNLOADS_DIR=/downloads

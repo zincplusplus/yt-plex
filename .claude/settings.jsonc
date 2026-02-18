@@ -1,0 +1,177 @@
+{
+  "allowedDomains": [
+    // Package registries
+    "npmjs.org",
+    "registry.npmjs.org",
+    "pypi.org",
+    "files.pythonhosted.org",
+
+    // CDNs
+    "cdn.jsdelivr.net",
+    "unpkg.com",
+    "cdnjs.cloudflare.com",
+    "esm.sh",
+
+    // GitHub & Version Control
+    "github.com",
+    "raw.githubusercontent.com",
+    "githubusercontent.com",
+    "api.github.com",
+
+    // Documentation sites
+    "developer.mozilla.org",
+    "docs.python.org",
+    "nodejs.org",
+    "devdocs.io",
+
+    // Frontend frameworks
+    "reactjs.org",
+    "react.dev",
+    "vuejs.org",
+    "angular.io",
+    "svelte.dev",
+    "nextjs.org",
+    "remix.run",
+
+    // CSS frameworks & tools
+    "tailwindcss.com",
+    "getbootstrap.com",
+    "sass-lang.com",
+    "lesscss.org",
+    "postcss.org",
+
+    // Build tools
+    "vitejs.dev",
+    "webpack.js.org",
+    "parceljs.org",
+    "esbuild.github.io",
+    "rollupjs.org",
+    "babeljs.io",
+    "swc.rs",
+
+    // Testing frameworks
+    "jestjs.io",
+    "vitest.dev",
+    "playwright.dev",
+    "selenium.dev",
+    "testing-library.com",
+    "mochajs.org",
+    "jasmine.github.io",
+    "cypress.io",
+
+    // Linting & formatting
+    "eslint.org",
+    "prettier.io",
+    "stylelint.io",
+    "pylint.org",
+
+    // Fonts & icons
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "fontawesome.com",
+    "icons8.com",
+
+    // UI component libraries
+    "mui.com",
+    "chakra-ui.com",
+    "ant.design",
+    "primereact.org",
+    "headlessui.com",
+    "radix-ui.com",
+    "shadcn.com",
+
+    // Python web frameworks
+    "flask.palletsprojects.com",
+    "fastapi.tiangolo.com",
+    "djangoproject.com",
+    "bottlepy.org",
+
+    // JavaScript utility libraries
+    "lodash.com",
+    "date-fns.org",
+    "dayjs.gitee.io",
+    "axios-http.com",
+    "zod.dev",
+
+    // State management
+    "redux.js.org",
+    "redux-toolkit.js.org",
+    "zustand-demo.pmnd.rs",
+    "jotai.org",
+    "recoiljs.org",
+
+    // Animation libraries
+    "greensock.com",
+    "framer.com",
+    "animejs.com",
+
+    // TypeScript
+    "typescriptlang.org",
+
+    // Local development
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "*.local",
+
+    // Image optimization
+    "sharp.pixelplumbing.com",
+
+    // API development tools
+    "openapi.tools",
+    "swagger.io",
+
+    // Package manager sites
+    "yarnpkg.com",
+    "pnpm.io",
+
+    // Polyfills & compatibility
+    "polyfill.io",
+    "caniuse.com"
+  ],
+
+  "allowedPorts": [
+    3000,    // Common dev server (React, Next.js)
+    3001,    // Alternative dev port
+    4000,    // Common dev server
+    5000,    // Flask default
+    5173,    // Vite default
+    5174,    // Vite alternative
+    8000,    // Django/FastAPI default
+    8080,    // Common dev server
+    8888,    // Jupyter
+    9000,    // Alternative dev port
+    9229     // Node.js debugging
+  ],
+
+  "allowCommands": [
+    "npm",
+    "npx",
+    "node",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "yarn",
+    "pnpm",
+    "git",
+    "curl",
+    "wget"
+  ],
+
+  "restrictFileAccess": {
+    "allowedDirectories": [
+      "/Users/zinc/Library/Mobile Documents/com~apple~CloudDocs/code",
+      "/tmp",
+      "/var/tmp"
+    ],
+    "blockedPatterns": [
+      "~/.ssh",
+      "~/.aws",
+      "~/.config/gcloud",
+      "**/node_modules/.cache",
+      "**/.env*",
+      "**/secrets.*"
+    ]
+  }
+}

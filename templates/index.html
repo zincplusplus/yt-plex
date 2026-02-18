@@ -143,7 +143,6 @@ input::placeholder{color:#444}
 
 .td-title{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--text-bright)}
-.td-title.clickable{}
 tr.row-deleted td{text-decoration:line-through;color:var(--text-dim)}
 tr.row-deleted .td-title{color:var(--text-dim)}
 .td-channel{color:var(--text-dim)}
@@ -159,6 +158,15 @@ tr.row-deleted .td-title{color:var(--text-dim)}
 .stat-active .stat-num{color:var(--blue)}
 .stat-done .stat-num{color:var(--green)}
 .stat-failed .stat-num{color:var(--red)}
+.sys-panel{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem}
+.sys-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.45rem .6rem;min-width:160px}
+.sys-label{color:var(--text-dim);font-size:.85em;text-transform:uppercase;letter-spacing:.08em}
+.sys-value{color:var(--text-bright);margin-top:.2rem}
+.worker-row{display:flex;gap:.4rem;flex-wrap:wrap}
+.worker-pill{display:inline-flex;align-items:center;gap:.3rem;padding:.12rem .38rem;border:1px solid var(--border);background:var(--surface2);border-radius:999px;color:var(--text-dim)}
+.worker-pill.live{border-color:var(--green);color:var(--green)}
+.worker-pill.stale{border-color:var(--yellow);color:var(--yellow)}
+.worker-pill.dead{border-color:var(--red);color:var(--red)}
 
 /* Toast notifications */
 .toast-container{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;
@@ -274,6 +282,24 @@ tr.row-deleted .td-title{color:var(--text-dim)}
           <div class="field-label">retention (days)</div>
           <input type="number" id="retentionDays" placeholder="e.g. 30" min="1" style="width:150px">
         </div>
+        <div>
+          <div class="toggle-row">
+            <label class="toggle-switch">
+              <input type="checkbox" id="sourceSponsorblock" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <span>SponsorBlock for this source</span>
+          </div>
+        </div>
+        <div>
+          <div class="toggle-row">
+            <label class="toggle-switch">
+              <input type="checkbox" id="sourceGeminiFallback" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Gemini fallback for this source</span>
+          </div>
+        </div>
       </div>
     </form>
     </div>
@@ -283,7 +309,7 @@ tr.row-deleted .td-title{color:var(--text-dim)}
   <section>
     <div class="section-header">
       <div class="section-label" data-section="sources" onclick="toggleSection(this)">Sources</div>
-      <button class="btn btn-sm btn-blue" onclick="scanNow()" id="scanBtn">scan now</button>
+      <button class="btn btn-sm btn-blue" onclick="scanNow(this)" id="scanBtn">scan now</button>
     </div>
     <div class="section-body" id="sourcesBody">
     <div id="sourcesList"><span class="loading"><span class="spinner"></span>loading</span></div>
@@ -334,10 +360,6 @@ tr.row-deleted .td-title{color:var(--text-dim)}
           <div class="field-label">output template</div>
           <input type="text" id="setTemplate">
         </div>
-        <div class="field full">
-          <div class="field-label">downloads host path (for CasaOS file links)</div>
-          <input type="text" id="setHostPath" placeholder="/DATA/downloads">
-        </div>
       </div>
       <div class="settings-actions">
         <button class="btn btn-submit" onclick="saveSettings()">save</button>
@@ -351,6 +373,7 @@ tr.row-deleted .td-title{color:var(--text-dim)}
   <section>
     <div class="section-label" data-section="queue" onclick="toggleSection(this)">Queue</div>
     <div class="section-body">
+    <div id="systemStatus" class="sys-panel"><span class="loading"><span class="spinner"></span>loading system status</span></div>
     <div id="queueStats" class="queue-stats"></div>
     <div id="queueList"><span class="loading"><span class="spinner"></span>loading</span></div>
     <div style="margin-top:1rem">
@@ -391,9 +414,25 @@ async function api(path, opts = {}) {
       err?.detail ||
       res.statusText;
     const firstFieldMsg = err?.error?.fields?.[0]?.message;
-    throw new Error(firstFieldMsg ? `${message}: ${firstFieldMsg}` : message);
+    const ex = new Error(firstFieldMsg ? `${message}: ${firstFieldMsg}` : message);
+    ex.code = err?.error?.code || err?.detail?.code || null;
+    throw ex;
   }
   return res.json();
+}
+
+function clearAddSourceForm() {
+  $('#sourceUrl').value = '';
+  $('#latestCount').value = '1';
+  $('#titleInclude').value = '';
+  $('#titleExclude').value = '';
+  $('#descInclude').value = '';
+  $('#descExclude').value = '';
+  $('#minMinutes').value = '';
+  $('#maxMinutes').value = '';
+  $('#retentionDays').value = '';
+  $('#sourceSponsorblock').checked = true;
+  $('#sourceGeminiFallback').checked = true;
 }
 
 // --- Sources ---
@@ -408,6 +447,8 @@ async function loadSources() {
     el.innerHTML = sources.map((s, i) => {
       const tags = [];
       if (s.start_after) tags.push('auto-start');
+      if (s.sponsorblock === false) tags.push('sponsorblock off');
+      if (s.gemini_fallback === false) tags.push('gemini fallback off');
       if (s.title_include) tags.push('title include: ' + s.title_include);
       if (s.title_exclude) tags.push('title exclude: ' + s.title_exclude);
       if (s.description_include) tags.push('desc include: ' + s.description_include);
@@ -422,8 +463,8 @@ async function loadSources() {
           ${tags.length ? '<div class="source-tags">' + tags.map(t => `<span class="tag">${esc(t)}</span>`).join('') + '</div>' : ''}
         </div>
         <div class="source-actions">
-          <button class="btn btn-sm" onclick="editSource(${i})">edit</button>
-          <button class="btn btn-sm btn-red" onclick="deleteSource(${i})">remove</button>
+          <button class="btn btn-sm" onclick="editSource('${esc(s.id || String(i))}')">edit</button>
+          <button class="btn btn-sm btn-red" onclick="deleteSource('${esc(s.id || String(i))}')">remove</button>
         </div>
       </div>`;
     }).join('');
@@ -448,6 +489,8 @@ async function addSource(e) {
     const mn = $('#minMinutes').value;
     const mx = $('#maxMinutes').value;
     const rd = $('#retentionDays').value;
+    body.sponsorblock = $('#sourceSponsorblock').checked;
+    body.gemini_fallback = $('#sourceGeminiFallback').checked;
     if (ti) body.title_include = ti;
     if (te) body.title_exclude = te;
     if (di) body.description_include = di;
@@ -460,30 +503,28 @@ async function addSource(e) {
       ? `Added: ${result.name} (${result.queued} video${result.queued > 1 ? 's' : ''} queued)`
       : `Added: ${result.name}`;
     toast(msg, 'success');
-    $('#sourceUrl').value = '';
-    $('#latestCount').value = '1';
-    $('#titleInclude').value = '';
-    $('#titleExclude').value = '';
-    $('#descInclude').value = '';
-    $('#descExclude').value = '';
-    $('#minMinutes').value = '';
-    $('#maxMinutes').value = '';
-    $('#retentionDays').value = '';
+    clearAddSourceForm();
     loadSources();
     loadQueue();
     loadQueueEvents();
   } catch (e) {
-    toast(e.message, 'error');
+    if (e.code === 'source_exists') {
+      toast('Did not add source: already in the list', 'error');
+      clearAddSourceForm();
+      loadSources();
+    } else {
+      toast(e.message, 'error');
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'add';
   }
 }
 
-async function deleteSource(index) {
+async function deleteSource(sourceId) {
   const del_files = confirm('Also delete downloaded files?');
   try {
-    const url = '/sources/' + index + (del_files ? '?delete_files=true' : '');
+    const url = '/sources/' + encodeURIComponent(sourceId) + (del_files ? '?delete_files=true' : '');
     const result = await api(url, { method: 'DELETE' });
     const msg = del_files && result.files_deleted
       ? `Removed: ${result.removed.name} (${result.files_deleted} files deleted)`
@@ -497,10 +538,10 @@ async function deleteSource(index) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function editSource(index) {
+async function editSource(sourceId) {
   try {
     const sources = await api('/sources');
-    const s = sources[index];
+    const s = sources.find(x => String(x.id || '') === String(sourceId)) || sources[parseInt(sourceId, 10)];
     if (!s) return toast('Source not found', 'error');
     $('#editModal').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">
       <div class="modal-box">
@@ -536,16 +577,30 @@ async function editSource(index) {
           <div class="field-label">retention (days)</div>
           <input type="number" id="editRetention" min="1" value="${s.retention_days||''}" style="width:150px">
         </div>
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="editSponsorblock" ${s.sponsorblock === false ? '' : 'checked'}>
+            <span class="toggle-slider"></span>
+          </label>
+          <span>SponsorBlock for this source</span>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="editGeminiFallback" ${s.gemini_fallback === false ? '' : 'checked'}>
+            <span class="toggle-slider"></span>
+          </label>
+          <span>Gemini fallback for this source</span>
+        </div>
         <div class="modal-actions">
           <button class="btn" onclick="closeModal()">cancel</button>
-          <button class="btn btn-submit" onclick="saveSource(${index})">save</button>
+          <button class="btn btn-submit" onclick="saveSource('${esc(s.id || String(sourceId))}')">save</button>
         </div>
       </div>
     </div>`;
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function saveSource(index) {
+async function saveSource(sourceId) {
   try {
     const body = {};
     const ti = $('#editTitleInclude').value;
@@ -555,6 +610,10 @@ async function saveSource(index) {
     const mn = $('#editMinMinutes').value;
     const mx = $('#editMaxMinutes').value;
     const rd = $('#editRetention').value;
+    const sb = $('#editSponsorblock').checked;
+    const gf = $('#editGeminiFallback').checked;
+    body.sponsorblock = sb;
+    body.gemini_fallback = gf;
     body.title_include = ti || null;
     body.title_exclude = te || null;
     body.description_include = di || null;
@@ -562,7 +621,7 @@ async function saveSource(index) {
     body.min_minutes = mn ? parseInt(mn) : null;
     body.max_minutes = mx ? parseInt(mx) : null;
     body.retention_days = rd ? parseInt(rd) : null;
-    await api('/sources/' + index, { method: 'PUT', body: JSON.stringify(body) });
+    await api('/sources/' + encodeURIComponent(sourceId), { method: 'PUT', body: JSON.stringify(body) });
     closeModal();
     toast('Source updated', 'success');
     loadSources();
@@ -573,13 +632,14 @@ function closeModal() {
   $('#editModal').innerHTML = '';
 }
 
-async function scanNow() {
-  const btn = $('#scanBtn');
+async function scanNow(btnEl) {
+  const btn = btnEl || $('#scanBtn');
   btn.disabled = true;
   btn.textContent = '...';
   try {
     const result = await api('/scan-now', { method: 'POST' });
     toast(`Scan complete: ${result.added} new video${result.added !== 1 ? 's' : ''}`, 'success');
+    loadSystemStatus();
     loadQueue();
     loadQueueEvents();
   } catch (e) {
@@ -627,6 +687,120 @@ function toggleAdvanced() {
 }
 
 // --- Queue ---
+let systemSnapshot = null;
+let nextScanSeconds = null;
+
+function fmtDuration(totalSeconds) {
+  if (totalSeconds == null) return '-';
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function fmtSince(ageSeconds) {
+  if (ageSeconds == null) return 'no heartbeat';
+  if (ageSeconds < 60) return `${ageSeconds}s ago`;
+  const m = Math.floor(ageSeconds / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
+}
+
+function workerClass(name, ageSeconds, scanner) {
+  // Scanner is timer/schedule-driven, so treat it as healthy when scheduled.
+  if (name === 'scanner') {
+    if (scanner?.is_scanning) return 'live';
+    if (scanner?.next_scan_in_seconds != null) return 'live';
+    if (ageSeconds == null) return 'dead';
+    if (ageSeconds <= 600) return 'stale';
+    return 'dead';
+  }
+  if (ageSeconds == null) return 'dead';
+  if (ageSeconds <= 20) return 'live';
+  if (ageSeconds <= 180) return 'stale';
+  return 'dead';
+}
+
+function renderSystemStatus() {
+  const root = $('#systemStatus');
+  if (!systemSnapshot) {
+    root.innerHTML = '<p class="empty-state">System status unavailable</p>';
+    return;
+  }
+
+  const scanner = systemSnapshot.scanner || {};
+  const workers = systemSnapshot.workers || {};
+  const queue = systemSnapshot.queue || {};
+  const workerNames = ['scanner', 'downloader', 'processor', 'cleanup'];
+
+  const workerHtml = workerNames.map(name => {
+    const w = workers[name] || {};
+    const cls = workerClass(name, w.heartbeat_age_seconds, scanner);
+    const active = w.active_video_id ? ` • ${esc(w.active_video_id.slice(0, 8))}` : '';
+    return `<span class="worker-pill ${cls}">${esc(name)} ${esc(fmtSince(w.heartbeat_age_seconds))}${active}</span>`;
+  }).join('');
+
+  const nextScanDisplay =
+    nextScanSeconds == null
+      ? (scanner.is_scanning ? 'scanning...' : 'pending')
+      : fmtDuration(nextScanSeconds);
+  const lastScanDisplay = scanner.is_scanning
+    ? 'in progress'
+    : (scanner.last_scan_at ? scanner.last_scan_at : '-');
+
+  root.innerHTML = `
+    <div class="sys-card">
+      <div class="sys-label">Next scan</div>
+      <div class="sys-value" id="nextScanValue">${esc(nextScanDisplay)}</div>
+    </div>
+    <div class="sys-card">
+      <div class="sys-label">Last scan</div>
+      <div class="sys-value">${esc(lastScanDisplay)}</div>
+    </div>
+    <div class="sys-card">
+      <div class="sys-label">Scan result</div>
+      <div class="sys-value">${typeof scanner.last_scan_added === 'number' ? scanner.last_scan_added : '-'} added</div>
+    </div>
+    <div class="sys-card" style="flex:1;min-width:300px">
+      <div class="sys-label">Workers</div>
+      <div class="sys-value worker-row">${workerHtml || '<span class="empty-state">No workers</span>'}</div>
+    </div>
+    <div class="sys-card">
+      <div class="sys-label">Queue active</div>
+      <div class="sys-value">${queue.active ?? '-'}</div>
+    </div>
+    <div class="sys-card">
+      <div class="sys-label">Queue failed</div>
+      <div class="sys-value">${queue.failed ?? '-'}</div>
+    </div>
+  `;
+}
+
+function tickScanCountdown() {
+  if (nextScanSeconds == null) return;
+  nextScanSeconds = Math.max(0, nextScanSeconds - 1);
+  const el = $('#nextScanValue');
+  if (el) el.textContent = fmtDuration(nextScanSeconds);
+}
+
+async function loadSystemStatus() {
+  try {
+    const status = await fetch('/api/system/status').then(r => {
+      if (!r.ok) throw new Error('status unavailable');
+      return r.json();
+    });
+    systemSnapshot = status;
+    nextScanSeconds = status?.scanner?.next_scan_in_seconds ?? null;
+    renderSystemStatus();
+  } catch (e) {
+    $('#systemStatus').innerHTML = '<p class="empty-state">Failed to load system status</p>';
+  }
+}
+
 const statusLabels = {
   pending: 'pending',
   downloading: 'downloading',
@@ -643,11 +817,11 @@ async function loadQueue() {
     const el = $('#queueList');
     const stats = $('#queueStats');
 
-    const pending = queue.filter(q => q.status === 'pending').length;
-    const active = queue.filter(q => q.status === 'downloading' || q.status === 'processing').length;
-    const done = queue.filter(q => q.status === 'done').length;
-    const failed = queue.filter(q => q.status === 'download_failed' || q.status === 'process_failed').length;
-    const total = queue.length;
+    const pending = systemSnapshot?.queue?.pending ?? queue.filter(q => q.status === 'pending').length;
+    const active = systemSnapshot?.queue?.active ?? queue.filter(q => q.status === 'downloading' || q.status === 'processing').length;
+    const done = systemSnapshot?.queue?.done ?? queue.filter(q => q.status === 'done').length;
+    const failed = systemSnapshot?.queue?.failed ?? queue.filter(q => q.status === 'download_failed' || q.status === 'process_failed').length;
+    const total = systemSnapshot?.queue?.total ?? queue.length;
 
     stats.innerHTML = `
       <div class="stat stat-pending"><span class="stat-num">${pending}</span> pending</div>
@@ -680,7 +854,7 @@ async function loadQueue() {
 
         return `<tr class="${isDeleted ? 'row-deleted' : ''}">
           <td><span class="status status-${q.status}"><span class="status-dot"></span></span></td>
-          <td class="td-title${isDone ? ' clickable' : ''}" ${isDone ? `data-channel="${esc(q.channel)}" data-vid="${q.video_id}" onclick="copyVideoPath(this)"` : ''}>${esc(q.title)}</td>
+          <td class="td-title">${esc(q.title)}</td>
           <td class="td-channel">${esc(q.channel)}</td>
           <td class="td-date">${q.date}</td>
           <td class="td-actions">${actions}</td>
@@ -743,12 +917,9 @@ async function deleteVideo(videoId) {
 }
 
 // --- Settings ---
-let currentSettings = {};
-
 async function loadSettings() {
   try {
     const s = await api('/settings');
-    currentSettings = s;
     $('#setScanInterval').value = s.scan_interval;
     $('#setSleep').value = s.sleep_between_downloads;
     $('#setResolution').value = s.preferred_resolution;
@@ -756,7 +927,6 @@ async function loadSettings() {
     $('#setSponsorblock').checked = s.sponsorblock;
     $('#setGemini').value = s.gemini_api_key;
     $('#setTemplate').value = s.output_template;
-    $('#setHostPath').value = s.downloads_host_path;
   } catch (e) {
     toast('Failed to load settings', 'error');
   }
@@ -772,33 +942,18 @@ async function saveSettings() {
       sponsorblock: $('#setSponsorblock').checked,
       gemini_api_key: $('#setGemini').value,
       output_template: $('#setTemplate').value,
-      downloads_host_path: $('#setHostPath').value,
     };
     await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
     const el = $('#settingsSaved');
     el.classList.add('show');
     setTimeout(() => el.classList.remove('show'), 2000);
+    loadSystemStatus();
   } catch (e) {
     toast(e.message, 'error');
   }
 }
 
 // --- Utils ---
-function videoPath(q) {
-  const base = (currentSettings.downloads_host_path || currentSettings.downloads_dir || '/downloads').replace(/\/+$/, '');
-  return base + '/' + q.channel + '/' + q.video_id;
-}
-
-function copyVideoPath(el) {
-  const channel = el.getAttribute('data-channel');
-  const vid = el.getAttribute('data-vid');
-  const path = videoPath({channel, video_id: vid});
-  navigator.clipboard.writeText(path).then(
-    () => toast('Copied: ' + path, 'success'),
-    () => toast('Copy failed', 'error')
-  );
-}
-
 function esc(s) {
   if (!s) return '';
   const d = document.createElement('div');
@@ -809,8 +964,11 @@ function esc(s) {
 // --- Init ---
 loadSources();
 loadSettings();
+loadSystemStatus();
 loadQueue();
 loadQueueEvents();
+setInterval(loadSystemStatus, 10000);
+setInterval(tickScanCountdown, 1000);
 setInterval(loadQueue, 15000);
 setInterval(loadQueueEvents, 15000);
 </script>

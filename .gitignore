@@ -5,3 +5,4 @@ __pycache__/
 data/
 downloads/
 .venv/
+.DS_Store

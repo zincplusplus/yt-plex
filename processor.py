@@ -358,18 +358,13 @@ async def post_process_one(video_id: str, downloads_dir: str,
     video_file = None
     info_json = None
 
-    for folder in downloads.rglob(video_id):
-        if folder.is_dir():
-            video_folder = folder
+    for channel_dir in downloads.iterdir():
+        if not channel_dir.is_dir():
+            continue
+        candidate = channel_dir / video_id
+        if candidate.exists() and candidate.is_dir():
+            video_folder = candidate
             break
-
-    if not video_folder:
-        # Try finding by file pattern
-        for f in downloads.rglob(f"*{video_id}*"):
-            if f.suffix == ".mp4":
-                video_folder = f.parent
-                video_file = f
-                break
 
     if not video_folder:
         logger.error(f"Could not find video folder for {video_id}")

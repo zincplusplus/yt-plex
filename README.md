@@ -1,10 +1,10 @@
 # yt-plex
 
-YouTube downloader with smart sponsor removal for Plex.
+YouTube downloader for Plex designed to be smart.
 
 ## Architecture
 
-Four independent services connected by a shared queue (`data/queue.md`). Each has a scheduler (dumb timer) and can also be triggered manually via the API.
+Four independent services connected by a shared SQLite queue (`data/queue.db`). Each has a scheduler (dumb timer) and can also be triggered manually via the API.
 
 ```
 Scanner → [ ] pending → Downloader → [p] processing → Post-processor → [x] done
@@ -24,13 +24,11 @@ Scanner → [ ] pending → Downloader → [p] processing → Post-processor →
 | `e`  | process_failed  | Failed to post-process after 3 attempts             |
 | `d`  | deleted         | Removed by retention, channel deletion, or manually |
 
-### Queue format
+### Queue storage
 
-Each line in `data/queue.md`:
-
-```
-- [status] upload_date | channel | title | video_id
-```
+Queue state is stored in SQLite (`data/queue.db`):
+- `queue_items`: current item state (`pending/downloading/processing/done/...`)
+- `queue_events`: append-only transition log for observability/debugging
 
 | Field       | Used by                             | Purpose                                                      |
 | ----------- | ----------------------------------- | ------------------------------------------------------------ |
@@ -74,16 +72,93 @@ Each line in `data/queue.md`:
 
 ### Failure handling
 
-Download and post-process failures are tracked with in-memory counters. After 3 consecutive failures, the video is marked `[!]` or `[e]` in the queue and stays there until manually retried. Retry via the API sends `[!]` back to `[ ]` and `[e]` back to `[p]`.
+Download and post-process failures are tracked persistently in SQLite counters (`attempt_download`, `attempt_process`). After 3 consecutive failures, the video is marked `[!]` or `[e]` in the queue and stays there until manually retried. Retry via the API sends `[!]` back to `[ ]` and `[e]` back to `[p]`.
 
 ### Concurrency
 
-The downloader, post-processor, and cleaner all write to `queue.md`. File writes must be serialized (e.g., asyncio lock) to prevent corruption.
+All queue writes are transactional SQLite updates (WAL mode), so readers can continue while writes happen and status changes are atomic.
+
+### Observability
+
+- `GET /healthz` — liveness probe
+- `GET /readyz` — readiness probe (includes worker heartbeat health)
+- `GET /api/system/status` — runtime snapshot (queue counts, worker activity, next scan/cleanup times)
+- `GET /metrics` — Prometheus-style metrics for queue and worker activity
+
+### Access Control
+
+Auth is optional by default (for local setup). If either key is set, mutating endpoints require tokens:
+
+- `YT_PLEX_OPERATOR_KEY`: scan/retry/prioritize/source edits
+- `YT_PLEX_ADMIN_KEY`: operator actions + delete/settings updates
+
+Send either:
+- `X-API-Key: <token>`
+- `Authorization: Bearer <token>`
+
+Optional audit actor:
+- `X-Actor: <name>`
 
 ## Local development
 
 ```bash
-pip install -r requirements.txt && cd app/static && npm install && npm run build && cd ../.. && DATA_DIR=./data DOWNLOADS_DIR=./downloads uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-exclude '.venv'
+cp -n .env.example .env
+mkdir -p data downloads
+./.venv/bin/pip install -r requirements.txt
+./.venv/bin/watchfiles --filter python --ignore-paths .git,.venv,data,downloads,__pycache__ "./.venv/bin/python main.py" .
 ```
 
 Open http://localhost:8080
+
+This runs the full app locally with auto-restart on file changes:
+- web API/UI (Uvicorn)
+- scanner loop
+- downloader loop
+- post-processor loop
+- cleanup loop
+
+To run API and workers as separate processes:
+
+```bash
+# Terminal 1 (API only)
+RUN_API=true RUN_WORKERS=false ./.venv/bin/python main.py
+
+# Terminal 2 (workers only)
+RUN_API=false RUN_WORKERS=true ./.venv/bin/python main.py
+```
+
+## Testing
+
+```bash
+./.venv/bin/python -m unittest discover -s tests -v
+```
+
+## Operations Docs
+
+- `docs/RUNBOOK.md`
+- `docs/RELEASE.md`
+- `docs/HOW_IT_WORKS.md`
+- `docs/CHANGES_PLAIN_ENGLISH.md`
+
+## Documentation Workflow
+
+This repo keeps maker-facing docs current so you can run the product without reading source code.
+
+Before committing code changes:
+
+1. Update `docs/CHANGES_PLAIN_ENGLISH.md` with what changed and why.
+2. If runtime behavior or architecture changed, update `docs/HOW_IT_WORKS.md`.
+
+Enable the commit guard once per clone:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+The pre-commit hook blocks code commits when `docs/CHANGES_PLAIN_ENGLISH.md` is not staged.
+
+If you only want API/UI hot reload (without background worker loops), run:
+
+```bash
+./.venv/bin/uvicorn server:app --reload --host 0.0.0.0 --port 8080
+```
