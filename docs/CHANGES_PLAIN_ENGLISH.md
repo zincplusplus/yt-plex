@@ -2,6 +2,19 @@
 
 This file should be updated in every commit that changes behavior, operations, or user-visible output.
 
+## 2026-02-18 — Settings import/export
+
+- Two new buttons in the Settings section: **export** and **import**.
+- Export downloads your current settings as `yt-plex-settings.json`. Import reads a previously exported file and applies it. Both skip `downloads_dir` since that's controlled by Docker, not the UI.
+- Useful for backing up settings before a reinstall or copying config to a new server.
+
+## 2026-02-18 — Single container, minimal env vars
+
+- Merged the two Docker containers (API + Worker) into one. The app already runs both the API and background workers in a single process by default — the two-container split was unnecessary overhead.
+- CasaOS now shows one app with one configuration panel instead of two separate services that needed identical settings configured independently.
+- `RUN_API` and `RUN_WORKERS` environment variables removed from docker-compose (both default to true in the app).
+- Stripped docker-compose.yml down to one env var (`DOWNLOADS_DIR`). The other nine (`SCAN_INTERVAL`, `SLEEP_BETWEEN_DOWNLOADS`, `SPONSORBLOCK`, `PREFERRED_RESOLUTION`, `RETENTION_DAYS`, `GEMINI_API_KEY`, `YT_PLEX_ADMIN_KEY`, `YT_PLEX_OPERATOR_KEY`, `TZ`) all have sensible defaults and are editable in the Settings UI — listing them in docker-compose just created clutter. Once you change a setting in the UI, the env var was ignored anyway.
+
 ## 2026-02-18 — Frontend: status tooltips, deep linking, wider layout
 
 - Status dots now show a tooltip on hover with context-aware detail: pending items show when they were queued; downloading/processing show start time and attempt number; done shows completion time; failed shows the error message and attempt count; deleted shows when and why.

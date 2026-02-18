@@ -1,51 +1,18 @@
 services:
-  yt-plex-mini-api:
-    build: .
-    image: yt-plex-mini:latest
-    container_name: yt-plex-mini-api
+  yt-plex-mini:
+    image: ghcr.io/zincplusplus/yt-plex:latest
+    container_name: yt-plex-mini
     restart: unless-stopped
     ports:
-      - "${PORT:-8081}:8080"
+      - "8081:8080"
     volumes:
-      - ${DATA_DIR:-./data}:/app/data
-      - ${DOWNLOADS_DIR:-./downloads}:/downloads
+      - ./data:/app/data
+      - ./downloads:/downloads
     environment:
       - DOWNLOADS_DIR=/downloads
-      - SCAN_INTERVAL=${SCAN_INTERVAL:-30}
-      - SLEEP_BETWEEN_DOWNLOADS=${SLEEP_BETWEEN_DOWNLOADS:-5}
-      - SPONSORBLOCK=${SPONSORBLOCK:-true}
-      - PREFERRED_RESOLUTION=${PREFERRED_RESOLUTION:-1080p}
-      - RETENTION_DAYS=${RETENTION_DAYS:-7}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - YT_PLEX_ADMIN_KEY=${YT_PLEX_ADMIN_KEY:-}
-      - YT_PLEX_OPERATOR_KEY=${YT_PLEX_OPERATOR_KEY:-}
-      - TZ=UTC
-      - RUN_API=true
-      - RUN_WORKERS=false
-
-  yt-plex-mini-worker:
-    image: yt-plex-mini:latest
-    container_name: yt-plex-mini-worker
-    restart: unless-stopped
-    depends_on:
-      - yt-plex-mini-api
-    volumes:
-      - ${DATA_DIR:-./data}:/app/data
-      - ${DOWNLOADS_DIR:-./downloads}:/downloads
-    environment:
-      - DOWNLOADS_DIR=/downloads
-      - SCAN_INTERVAL=${SCAN_INTERVAL:-30}
-      - SLEEP_BETWEEN_DOWNLOADS=${SLEEP_BETWEEN_DOWNLOADS:-5}
-      - SPONSORBLOCK=${SPONSORBLOCK:-true}
-      - PREFERRED_RESOLUTION=${PREFERRED_RESOLUTION:-1080p}
-      - RETENTION_DAYS=${RETENTION_DAYS:-7}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - TZ=UTC
-      - RUN_API=false
-      - RUN_WORKERS=true
 
 x-casaos:
-  main: yt-plex-mini-api
+  main: yt-plex-mini
   store_app_id: yt-plex-mini
   title:
     en_us: yt-plex mini

@@ -382,6 +382,9 @@ tr.row-highlight td{background:rgba(100,160,255,0.15);transition:background 1.5s
       <div class="settings-actions">
         <button class="btn btn-submit" onclick="saveSettings()">save</button>
         <span class="settings-saved" id="settingsSaved">saved</span>
+        <button class="btn btn-blue btn-sm" onclick="exportSettings()">export</button>
+        <button class="btn btn-blue btn-sm" onclick="document.getElementById('settingsFileInput').click()">import</button>
+        <input type="file" id="settingsFileInput" accept=".json" hidden onchange="importSettings(event)">
       </div>
     </div>
     </div>
@@ -1048,6 +1051,38 @@ async function saveSettings() {
     loadSystemStatus();
   } catch (e) {
     toast(e.message, 'error');
+  }
+}
+
+async function exportSettings() {
+  try {
+    const s = await api('/settings');
+    delete s.downloads_dir;
+    const blob = new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'yt-plex-settings.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Settings exported', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function importSettings(event) {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const body = JSON.parse(text);
+    delete body.downloads_dir;
+    await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
+    await loadSettings();
+    toast('Settings imported', 'success');
+  } catch (e) {
+    toast(e.message || 'Invalid settings file', 'error');
   }
 }
 
