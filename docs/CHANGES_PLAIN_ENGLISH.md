@@ -2,6 +2,97 @@
 
 This file should be updated in every commit that changes behavior, operations, or user-visible output.
 
+## 2026-02-18 — chore: CLAUDE.md is now a symlink to AGENTS.md
+
+No behavior change. Keeps a single source of truth for agent instructions.
+
+## 2026-02-18 — Cleanup now runs at 4 AM in your timezone
+
+Cleanup no longer runs at a random time tied to container restarts. It now runs every night at 4 AM in your timezone, which is auto-detected from your browser on first visit. The schedule handles DST transitions correctly.
+
+## 2026-02-18
+
+### NFO files now link back to yt-plex
+
+- Each `.nfo` file written for Plex now includes a `<website>` field pointing to the exact queue entry: `http://your-server:8080/#queue/VIDEO_ID`.
+- Opening that URL takes you straight to the Queue section in yt-plex with the row scrolled into view and briefly highlighted.
+- The server URL is auto-detected on first browser visit (`window.location.origin`) and saved as the `base_url` setting. No manual configuration needed on standard setups. The detection logic lives in a single `initSettings()` function — adding more auto-filled settings in the future is a one-liner there.
+- Users on keyed deployments can set or override `base_url` manually in the Settings section.
+- If `base_url` is unset, the `<website>` element is omitted from the NFO (no empty or broken links).
+
+
+
+### Status dot tooltips upgraded: larger target, copyable, no false blinking
+
+- Hover target is now the full table cell with padding, not just the 7px dot — easier to land on.
+- Tooltips are now custom (replaced native browser `title` attribute). They show a "click to copy" hint and copy the tooltip text to clipboard on click. The tooltip briefly flashes "Copied!" in green, then restores.
+- Status dots in the Recent Events log no longer pulse. Events are historical — a `downloading` dot from an old transition shouldn't keep blinking.
+- Deleted items now have a gray dot instead of no dot.
+
+### Deleted tooltip now explains why the item was removed
+
+- Hovering a deleted item's dot now says why it was deleted, not just when.
+- Cleanup worker stores the reason at delete time:
+  - **Retention (global):** "Removed by global retention policy: older than 7 days"
+  - **Retention (source override):** "Removed by source retention policy: older than 30 days"
+  - **Orphan (file gone):** "File missing — removed by Plex or an external process"
+  - **Manual delete:** "Manually deleted"
+  - **Source removed:** "Source removed"
+- Items deleted before this change show no reason (the data wasn't captured).
+
+### .env file eliminated entirely
+- CasaOS never reads `.env` — it manages volumes and env vars through its own UI. The `.env` we were rsync'ing to the server was being silently ignored the whole time.
+- All docker-compose variables already have sensible defaults, so `.env` isn't needed for plain docker-compose users either (unless they want non-default paths/ports).
+- `deploy.sh` now excludes `.env` from rsync so it can never accidentally overwrite server-side config.
+- `TZ=UTC` hardcoded in `docker-compose.yml` for both services. The container was already running in UTC (the `TZ` in `.env` was never applied); now this is explicit and deterministic.
+- `.env.example` rewritten to a minimal optional-overrides reference for non-CasaOS users only. Gemini API key note added pointing to the Settings panel.
+
+### App no longer auto-loads .env file
+- `main.py` previously called `load_dotenv()` which silently loaded `.env` from disk on startup. This meant local dev runs inherited deployment config like `DOWNLOADS_DIR=/mnt/plex1/YouTube`, which could cause unexpected behaviour.
+- Now the app reads environment variables directly from the process environment — the same way it works inside Docker. No `.env` file is needed to run the app.
+- `python-dotenv` removed from `requirements.txt`.
+- `deploy.sh` had its two deploy-specific variables (`DEPLOY_TARGET`, `DEPLOY_REMOTE_DIR`) hardcoded directly — it no longer sources `.env`.
+- `.env.example` updated to clarify it's a docker-compose override file, not app config.
+
+### Deploys are now faster (BuildKit cache mounts)
+- `deploy.sh` previously ran `docker compose build --no-cache` on every deploy. This forced apt and pip to download everything from scratch each time.
+- Now uses BuildKit cache mounts: apt packages and pip wheels are cached on the remote host's filesystem between builds, so they don't re-download unless a package actually changes.
+- The first deploy after this change will be as slow as before (cold cache). Every deploy after that: only changed packages fetch from the network.
+- No stale-layer risk: cache mounts are host-filesystem caches, not Docker layer cache, so they can't bake stale code into an image.
+
+
+
+### Time display now uses familiar messaging-style tiers
+- Consolidated two overlapping time functions (`timeAgo` and `fmtSince`) into one `timeAgo` function.
+- New tiers match how iOS Messages / WhatsApp show timestamps:
+  - Under 1 minute → "just now"
+  - Under 1 hour → "5m ago"
+  - Under 24 hours → "3h ago"
+  - Yesterday → "yesterday"
+  - This week → day name (e.g. "Monday")
+  - Older, same year → "Feb 15"
+  - Different year → "Feb 15, 2025"
+- Applies to queue item tooltips and worker heartbeat pills in the system status panel.
+
+### Deploy script no longer overwrites production data
+- Previously, `deploy.sh` used `scp -r *` which copied the local `data/` directory (including your local queue database) onto the production server.
+- Now uses `rsync` with explicit excludes for `data/`, `downloads/`, `.venv/`, `__pycache__/`, and `.git/`.
+- The `.env` file is still deployed (it's included by rsync since it's not excluded).
+- Production data backups still happen before the container rebuild.
+
+### Status dots now have tooltips explaining the current situation
+- Hover over the colored dot next to any queue item to see what's happening.
+- **Pending**: shows when it was queued (e.g. "queued 5m ago").
+- **Downloading**: shows when the download started and which attempt it's on.
+- **Processing**: shows when post-processing started and which attempt.
+- **Done**: shows when processing completed.
+- **Failed** (download or processing): shows the error reason and how many attempts were made.
+- **Deleted**: shows when it was removed.
+
+### Recent events now show video title instead of video ID
+- The recent events panel in the queue section now displays the video title, matching how the queue table shows items.
+- Falls back to video ID if the title is unavailable (e.g. deleted items with no queue record).
+
 ## 2026-02-17
 
 ### Documentation workflow added
