@@ -19,6 +19,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - YT_PLEX_ADMIN_KEY=${YT_PLEX_ADMIN_KEY:-}
       - YT_PLEX_OPERATOR_KEY=${YT_PLEX_OPERATOR_KEY:-}
+      - TZ=UTC
       - RUN_API=true
       - RUN_WORKERS=false
 
@@ -39,6 +40,7 @@ services:
       - PREFERRED_RESOLUTION=${PREFERRED_RESOLUTION:-1080p}
       - RETENTION_DAYS=${RETENTION_DAYS:-7}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TZ=UTC
       - RUN_API=false
       - RUN_WORKERS=true
 

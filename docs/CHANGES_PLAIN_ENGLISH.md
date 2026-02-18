@@ -2,6 +2,14 @@
 
 This file should be updated in every commit that changes behavior, operations, or user-visible output.
 
+## 2026-02-18 — Infra: rsync deploy, BuildKit cache mounts, dropped python-dotenv
+
+- `deploy.sh` now uses `rsync` instead of `scp`, properly excluding `data/`, `downloads/`, `.venv`, `.env`, etc. Docker build no longer uses `--no-cache`.
+- `Dockerfile` uses BuildKit cache mounts for apt and pip — rebuilds are much faster.
+- `docker-compose.yml` pins `TZ=UTC` on both services so timestamps are consistent regardless of host timezone.
+- `.env.example` simplified to just the overrides that matter; removed explicit defaults.
+- `python-dotenv` removed — settings come from env vars and `data/settings.json` only.
+
 ## 2026-02-18 — chore: CLAUDE.md is now a symlink to AGENTS.md
 
 No behavior change. Keeps a single source of truth for agent instructions.
