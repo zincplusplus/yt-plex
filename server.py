@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import zoneinfo
 from typing import Any
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -539,7 +540,7 @@ async def delete_source(source_id: str, request: Request, delete_files: bool = F
 
         for entry in parse_queue():
             if entry["channel"] == name and entry["status"] in ("pending", "done", "download_failed", "process_failed"):
-                await mark_deleted(entry["video_id"], actor="api")
+                await mark_deleted(entry["video_id"], actor="api", reason="Source removed")
 
     _audit(
         "source_delete",
@@ -682,7 +683,7 @@ async def delete_video(video_id: str, request: Request):
     # Delete files
     _delete_video_files(video_id)
 
-    await mark_deleted(video_id, actor=actor)
+    await mark_deleted(video_id, actor=actor, reason="Manually deleted")
     _audit("queue_delete", actor, video_id=video_id)
     return {"deleted": video_id}
 
@@ -698,6 +699,8 @@ _ENV_DEFAULTS = {
         "%(channel)s/%(id)s/%(title)s.%(ext)s"),
     "retention_days": int(os.getenv("RETENTION_DAYS", "7")),
     "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+    "base_url": os.getenv("BASE_URL", ""),
+    "cleanup_timezone": os.getenv("CLEANUP_TIMEZONE", "Europe/Amsterdam"),
 }
 
 _SETTINGS_TYPES = {
@@ -708,6 +711,8 @@ _SETTINGS_TYPES = {
     "output_template": str,
     "retention_days": int,
     "gemini_api_key": str,
+    "base_url": str,
+    "cleanup_timezone": str,
 }
 
 
@@ -732,6 +737,8 @@ class SettingsUpdateRequest(BaseModel):
     output_template: str | None = Field(default=None, min_length=1, max_length=OUTPUT_TEMPLATE_MAX_LEN)
     retention_days: int | None = Field(default=None, ge=1, le=SETTINGS_RETENTION_MAX_DAYS)
     gemini_api_key: str | None = Field(default=None, max_length=GEMINI_KEY_MAX_LEN)
+    base_url: str | None = Field(default=None, max_length=500)
+    cleanup_timezone: str | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -755,12 +762,21 @@ class SettingsUpdateRequest(BaseModel):
             raise ValueError("output_template cannot be empty")
         return value
 
-    @field_validator("gemini_api_key")
+    @field_validator("gemini_api_key", "base_url")
     @classmethod
     def strip_optional_text(cls, v: str | None) -> str | None:
         if v is None:
             return None
         return v.strip()
+
+    @field_validator("cleanup_timezone")
+    @classmethod
+    def validate_timezone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if v not in zoneinfo.available_timezones():
+            raise ValueError("cleanup_timezone must be a valid IANA timezone identifier")
+        return v
 
 
 @app.put("/api/settings")

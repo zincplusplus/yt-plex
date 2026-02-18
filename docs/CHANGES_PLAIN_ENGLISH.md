@@ -2,6 +2,15 @@
 
 This file should be updated in every commit that changes behavior, operations, or user-visible output.
 
+## 2026-02-18 — Backend: deletion reasons, richer queue data, NFO deep links
+
+- Every deletion now records why it happened. Cleanup stores "Removed by global/source retention policy: older than N days" or "File missing — removed by Plex or an external process". Manual deletes store "Manually deleted". Source-removal deletes store "Source removed". The reason shows up in the queue's deleted-item tooltip.
+- `parse_queue()` now returns `created_at`, `updated_at`, `last_error`, `attempt_download`, and `attempt_process` per item — previously these fields were dropped before reaching the API.
+- Queue events now include the video title (joined from the queue table), so the event log can show titles instead of raw video IDs.
+- Per-source retention now only overrides global retention when a source explicitly sets `retention_days`. Previously, a source with no retention setting would silently inherit global retention through the map — the logic was equivalent but fragile.
+- NFO files now include a `<website>` field pointing to `{base_url}/#queue/{video_id}` when `base_url` is configured.
+- `base_url` and `cleanup_timezone` added to settings (see earlier timezone entry for details).
+
 ## 2026-02-18 — Infra: rsync deploy, BuildKit cache mounts, dropped python-dotenv
 
 - `deploy.sh` now uses `rsync` instead of `scp`, properly excluding `data/`, `downloads/`, `.venv`, `.env`, etc. Docker build no longer uses `--no-cache`.

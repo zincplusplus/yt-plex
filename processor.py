@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 from xml.dom.minidom import parseString
 from xml.etree.ElementTree import Element, SubElement, tostring
 
+import settings as _settings
+
 logger = logging.getLogger(__name__)
 
 SB_API = "https://sponsor.ajay.app/api"
@@ -319,6 +321,10 @@ def write_nfo(video_folder: Path, info: dict):
 
     uid = SubElement(root, "uniqueid", type="youtube", default="true")
     uid.text = info.get("video_id", "")
+
+    base_url = _settings.get("base_url", "").rstrip("/")
+    if base_url:
+        SubElement(root, "website").text = f"{base_url}/#queue/{info.get('video_id', '')}"
 
     duration = info.get("duration")
     if duration:

@@ -8,9 +8,9 @@ import shutil
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import uvicorn
-from dotenv import load_dotenv
 
 import settings
 import runtime_state
@@ -20,8 +20,6 @@ from videoqueue import (
     record_download_success, record_download_failure,
     record_process_success, record_process_failure,
 )
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +41,7 @@ ENV_DEFAULTS = {
         "%(channel)s/%(id)s/%(title)s.%(ext)s"),
     "retention_days": os.getenv("RETENTION_DAYS", "7"),
     "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+    "cleanup_timezone": os.getenv("CLEANUP_TIMEZONE", "Europe/Amsterdam"),
 }
 
 
@@ -317,11 +316,12 @@ async def cleanup_loop():
                 except Exception:
                     pass
 
-            retention_map = {}
+            # Build a map of channels with explicit source-level retention overrides
+            source_retention_map: dict[str, int] = {}
             for s in sources:
                 name = s.get("name", "")
-                days = s.get("retention_days", global_retention)
-                retention_map[name] = days
+                if name and s.get("retention_days") is not None:
+                    source_retention_map[name] = int(s["retention_days"])
 
             entries = parse_queue()
             now = datetime.now()
@@ -339,12 +339,18 @@ async def cleanup_loop():
                         shutil.rmtree(video_dir)
                         _log_event(logging.INFO, "cleanup_removed_empty_folder", path=str(video_dir))
                     _log_event(logging.INFO, "cleanup_mark_deleted", video_id=vid, reason="orphan")
-                    await mark_deleted(vid)
+                    await mark_deleted(vid, actor="cleanup", reason="File missing — removed by Plex or an external process")
                     deleted_count += 1
                     continue
 
                 # Pass 2: retention cleanup
-                retention = retention_map.get(entry["channel"], global_retention)
+                channel = entry["channel"]
+                if channel in source_retention_map:
+                    retention = source_retention_map[channel]
+                    retention_label = f"Removed by source retention policy: older than {retention} days"
+                else:
+                    retention = global_retention
+                    retention_label = f"Removed by global retention policy: older than {retention} days"
                 cutoff = now - timedelta(days=retention)
 
                 try:
@@ -359,7 +365,7 @@ async def cleanup_loop():
                     shutil.rmtree(video_dir)
                     _log_event(logging.INFO, "cleanup_retention_delete_folder", path=str(video_dir))
 
-                await mark_deleted(vid)
+                await mark_deleted(vid, actor="cleanup", reason=retention_label)
                 _log_event(logging.INFO, "cleanup_mark_deleted", video_id=vid, reason="retention")
                 deleted_count += 1
 
@@ -380,11 +386,24 @@ async def cleanup_loop():
             )
             _log_event(logging.INFO, "cleanup_complete", deleted=deleted_count)
 
-        # Run once per day
-        runtime_state.set_component("cleanup", next_cleanup_at=_in_seconds_iso(86400))
-        for _ in range(1440):
-            await asyncio.sleep(60)
+        # Sleep until next 4 AM in the configured timezone
+        tz_name = settings.get("cleanup_timezone", ENV_DEFAULTS["cleanup_timezone"])
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = ZoneInfo("Europe/Amsterdam")
+        now_tz = datetime.now(tz)
+        target = now_tz.replace(hour=4, minute=0, second=0, microsecond=0)
+        if now_tz >= target:
+            target += timedelta(days=1)
+        sleep_seconds = (target - now_tz).total_seconds()
+        runtime_state.set_component("cleanup", next_cleanup_at=target.isoformat())
+        elapsed = 0.0
+        while elapsed < sleep_seconds:
+            chunk = min(60.0, sleep_seconds - elapsed)
+            await asyncio.sleep(chunk)
             runtime_state.touch_worker("cleanup")
+            elapsed += chunk
 
 
 async def main():

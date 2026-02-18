@@ -160,7 +160,9 @@ def parse_queue() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT video_id, status, upload_date, channel, title, created_at
+            SELECT video_id, status, upload_date, channel, title,
+                   created_at, updated_at, last_error,
+                   attempt_download, attempt_process
             FROM queue_items
             ORDER BY created_at ASC
             """
@@ -177,7 +179,11 @@ def parse_queue() -> list[dict]:
                 "channel": r["channel"],
                 "title": r["title"],
                 "video_id": r["video_id"],
-                "raw": f"- [?] {date} | {r['channel']} | {r['title']} | {r['video_id']}",
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "last_error": r["last_error"],
+                "attempt_download": r["attempt_download"],
+                "attempt_process": r["attempt_process"],
             }
         )
     return entries
@@ -425,9 +431,11 @@ def get_queue_events(limit: int = 100) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, video_id, at, actor, from_status, to_status, message
-            FROM queue_events
-            ORDER BY id DESC
+            SELECT e.id, e.video_id, e.at, e.actor, e.from_status, e.to_status, e.message,
+                   q.title
+            FROM queue_events e
+            LEFT JOIN queue_items q ON q.video_id = e.video_id
+            ORDER BY e.id DESC
             LIMIT ?
             """,
             (limit,),
@@ -437,6 +445,7 @@ def get_queue_events(limit: int = 100) -> list[dict]:
         {
             "id": r["id"],
             "video_id": r["video_id"],
+            "title": r["title"],
             "at": r["at"],
             "actor": r["actor"],
             "from_status": r["from_status"],
@@ -566,8 +575,22 @@ async def mark_done(video_id: str):
     _set_status(video_id, "done")
 
 
-async def mark_deleted(video_id: str, actor: str = "system"):
-    _set_status(video_id, "deleted", actor=actor)
+async def mark_deleted(video_id: str, actor: str = "system", reason: str | None = None):
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT status FROM queue_items WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return
+        old_status = row["status"]
+        conn.execute(
+            "UPDATE queue_items SET status = 'deleted', updated_at = ?, priority = 0, last_error = ? WHERE video_id = ?",
+            (_now(), reason, video_id),
+        )
+        _append_event(conn, video_id, actor, old_status, "deleted", reason)
+        conn.commit()
 
 
 async def mark_pending(video_id: str):
