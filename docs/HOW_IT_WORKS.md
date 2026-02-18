@@ -164,7 +164,7 @@ Processing steps:
    - Replaces original file when output is valid.
 3. Metadata artifacts:
    - Renames first thumbnail to `poster.jpg`.
-   - Writes `.nfo`.
+   - Writes `.nfo` with title, description, air date, studio, unique YouTube ID, and (if `base_url` is configured) a `<website>` link back to the exact queue entry in yt-plex (`{base_url}/#queue/{video_id}`).
 
 Retry and failure behavior:
 
@@ -186,7 +186,10 @@ Purpose:
 
 Cadence:
 
-- Runs once every 24 hours.
+- Runs immediately when the worker starts, then every night at 4 AM in the configured cleanup timezone.
+- The timezone is detected automatically from your browser on first visit and saved to settings. You can override it by updating the `cleanup_timezone` setting directly. Default: Europe/Amsterdam.
+- The schedule is DST-aware — spring-forward and fall-back days are handled correctly.
+- A container restart runs cleanup immediately, then re-anchors to the next 4 AM in your timezone.
 
 Two-pass behavior over `done` items:
 
@@ -319,6 +322,14 @@ Displayed summary:
 
 - `pending`, `active` (`downloading+processing`), `done`, `failed`, `total`.
 
+Status dot tooltips (hover over the colored dot):
+
+- Pending: when the video was queued.
+- Downloading/Processing: when it started and which attempt.
+- Done: when it completed.
+- Failed: the error message and attempt count.
+- Deleted: when it was removed.
+
 Row actions by status:
 
 - `pending`: `now`, `del`.
@@ -381,7 +392,7 @@ Backed by:
 
 What appears:
 
-- `video_id`, transition (`from -> to`), timestamp, actor, optional message.
+- Video title, transition (`from -> to`), timestamp, actor, optional message.
 
 What to expect:
 
@@ -400,3 +411,20 @@ What to expect:
   - System status: every 10s.
   - Queue and events: every 15s.
   - Scan countdown: every 1s.
+
+## 3) Deployment (`deploy.sh`)
+
+Single script, run locally. Reads `DEPLOY_TARGET` (SSH host alias) and `DEPLOY_REMOTE_DIR` (absolute path on the server) from a local `.env` file.
+
+Steps in order:
+
+1. **Clear the remote app directory** — deletes everything under `DEPLOY_REMOTE_DIR` except `data/` and `downloads/`, so stale code files don't accumulate. Database, settings, and downloaded files are untouched.
+2. **rsync the project** — copies the local working directory to the remote, skipping `data/`, `downloads/`, `.venv/`, `__pycache__/`, `.git/`, and `.DS_Store`.
+3. **Back up remote data files** — before rebuilding, creates timestamped copies of `queue.db`, `settings.json`, and `sources.json` into `data/backups/` on the remote. These are a safety net only; they are not automatically rotated.
+4. **Rebuild and restart the container** — runs `docker compose down`, `docker compose build` (with BuildKit), then `docker compose up -d`.
+
+What to expect:
+- The `data/` and `downloads/` directories on the server survive every deploy unchanged.
+- Each deploy creates one new backup snapshot of the three data files.
+- If `docker compose build` or `up` fails, the container stays down until the problem is fixed and deploy is re-run.
+- No rollback logic — restoring from a backup snapshot is manual.

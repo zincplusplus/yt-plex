@@ -26,7 +26,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:14
 ::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
 
 /* Layout */
-.shell{max-width:860px;margin:0 auto;padding:2rem 1.5rem 4rem}
+.shell{max-width:1140px;margin:0 auto;padding:2rem 1.5rem 4rem}
 
 /* Header */
 header{margin-bottom:3rem;animation:fadeDown .5s ease}
@@ -139,12 +139,26 @@ input::placeholder{color:#444}
 .status-done .status-dot{background:var(--green)}
 .status-download_failed .status-dot{background:var(--red)}
 .status-process_failed .status-dot{background:var(--red)}
-.status-deleted .status-dot{display:none}
+.status-deleted .status-dot{background:var(--text-dim)}
+.status-static .status-dot{animation:none}
+
+/* Custom tooltip on status column */
+.status-cell{position:relative;cursor:pointer;padding:.4rem .55rem}
+.ctip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:.3rem .65rem;font-size:.8em;color:var(--text);width:220px;word-break:break-word;
+  z-index:50;pointer-events:none;opacity:0;transition:opacity .15s;
+  display:flex;flex-direction:column;gap:.12rem;line-height:1.4}
+.status-cell:hover .ctip{opacity:1;pointer-events:auto}
+.ctip-hint{color:var(--text-dim);font-size:.82em}
+.ctip-copied .ctip-text{color:var(--green)}
+.ctip-copied .ctip-hint{display:none}
 
 .td-title{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--text-bright)}
 tr.row-deleted td{text-decoration:line-through;color:var(--text-dim)}
 tr.row-deleted .td-title{color:var(--text-dim)}
+tr.row-highlight td{background:rgba(100,160,255,0.15);transition:background 1.5s ease}
 .td-channel{color:var(--text-dim)}
 .td-date{color:var(--text-dim);white-space:nowrap}
 .td-actions{text-align:right;white-space:nowrap}
@@ -355,6 +369,10 @@ tr.row-deleted .td-title{color:var(--text-dim)}
         <div class="field">
           <div class="field-label">Gemini API key</div>
           <input type="password" id="setGemini" placeholder="optional">
+        </div>
+        <div class="field full">
+          <div class="field-label">server url</div>
+          <input type="text" id="setBaseUrl" placeholder="http://192.168.1.100:8080 (auto-detected on first visit)">
         </div>
         <div class="field full">
           <div class="field-label">output template</div>
@@ -678,6 +696,41 @@ function toggleSection(label) {
   }
 }
 
+// --- Hash routing ---
+function openSection(key) {
+  const label = document.querySelector(`.section-label[data-section="${key}"]`);
+  if (!label || label.classList.contains('open')) return;
+  label.classList.add('open');
+  const body = label.closest('section').querySelector('.section-body');
+  if (body) body.classList.add('open');
+  const saved = _getSectionState();
+  saved[key] = true;
+  localStorage.setItem('yt-plex-sections', JSON.stringify(saved));
+}
+
+async function scrollToVideo(videoId, retries = 8) {
+  for (let i = 0; i < retries; i++) {
+    const row = document.querySelector(`tr[data-video-id="${CSS.escape(videoId)}"]`);
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.classList.add('row-highlight');
+      setTimeout(() => row.classList.remove('row-highlight'), 2000);
+      return;
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+}
+
+async function applyHash(hash) {
+  const raw = (hash || '').replace(/^#/, '');
+  if (!raw.startsWith('queue')) return;
+  openSection('queue');
+  const videoId = raw.split('/')[1];
+  if (videoId) await scrollToVideo(videoId);
+  else document.querySelector('.section-label[data-section="queue"]')
+              ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // --- Advanced toggle ---
 function toggleAdvanced() {
   const toggle = document.querySelector('.advanced-toggle');
@@ -690,6 +743,54 @@ function toggleAdvanced() {
 let systemSnapshot = null;
 let nextScanSeconds = null;
 
+function timeAgo(isoStr) {
+  if (!isoStr) return '';
+  const now = new Date();
+  const then = new Date(isoStr);
+  const diff = (now - then) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  // "yesterday" if the calendar date is exactly one day before today
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (then.toDateString() === yesterday.toDateString()) return 'yesterday';
+  // day name if within the last 7 calendar days
+  if (diff < 7 * 86400) return then.toLocaleDateString(undefined, { weekday: 'long' });
+  // month + day, add year if different
+  const opts = { month: 'short', day: 'numeric' };
+  if (then.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return then.toLocaleDateString(undefined, opts);
+}
+
+function statusTooltip(q) {
+  switch (q.status) {
+    case 'pending':
+      return 'Pending \u2014 queued ' + timeAgo(q.created_at);
+    case 'downloading':
+      return 'Downloading \u2014 started ' + timeAgo(q.updated_at)
+        + (q.attempt_download > 0 ? ', attempt ' + (q.attempt_download + 1) : '');
+    case 'processing':
+      return 'Processing \u2014 started ' + timeAgo(q.updated_at)
+        + (q.attempt_process > 0 ? ', attempt ' + (q.attempt_process + 1) : '');
+    case 'done':
+      return 'Done \u2014 completed ' + timeAgo(q.updated_at);
+    case 'download_failed':
+      return 'Download failed \u2014 '
+        + (q.last_error || 'unknown error')
+        + ' (after ' + q.attempt_download + ' attempts)';
+    case 'process_failed':
+      return 'Processing failed \u2014 '
+        + (q.last_error || 'unknown error')
+        + ' (after ' + q.attempt_process + ' attempts)';
+    case 'deleted':
+      return 'Deleted ' + timeAgo(q.updated_at)
+        + (q.last_error ? '. ' + q.last_error : '');
+    default:
+      return q.status;
+  }
+}
+
 function fmtDuration(totalSeconds) {
   if (totalSeconds == null) return '-';
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -701,27 +802,21 @@ function fmtDuration(totalSeconds) {
   return `${sec}s`;
 }
 
-function fmtSince(ageSeconds) {
-  if (ageSeconds == null) return 'no heartbeat';
-  if (ageSeconds < 60) return `${ageSeconds}s ago`;
-  const m = Math.floor(ageSeconds / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return `${h}h ago`;
-}
-
-function workerClass(name, ageSeconds, scanner) {
+function workerClass(name, w, scanner) {
+  const age = w.last_heartbeat
+    ? (Date.now() - new Date(w.last_heartbeat).getTime()) / 1000
+    : null;
   // Scanner is timer/schedule-driven, so treat it as healthy when scheduled.
   if (name === 'scanner') {
     if (scanner?.is_scanning) return 'live';
     if (scanner?.next_scan_in_seconds != null) return 'live';
-    if (ageSeconds == null) return 'dead';
-    if (ageSeconds <= 600) return 'stale';
+    if (age == null) return 'dead';
+    if (age <= 600) return 'stale';
     return 'dead';
   }
-  if (ageSeconds == null) return 'dead';
-  if (ageSeconds <= 20) return 'live';
-  if (ageSeconds <= 180) return 'stale';
+  if (age == null) return 'dead';
+  if (age <= 20) return 'live';
+  if (age <= 180) return 'stale';
   return 'dead';
 }
 
@@ -739,9 +834,10 @@ function renderSystemStatus() {
 
   const workerHtml = workerNames.map(name => {
     const w = workers[name] || {};
-    const cls = workerClass(name, w.heartbeat_age_seconds, scanner);
+    const cls = workerClass(name, w, scanner);
     const active = w.active_video_id ? ` • ${esc(w.active_video_id.slice(0, 8))}` : '';
-    return `<span class="worker-pill ${cls}">${esc(name)} ${esc(fmtSince(w.heartbeat_age_seconds))}${active}</span>`;
+    const hb = w.last_heartbeat ? timeAgo(w.last_heartbeat) : 'no heartbeat';
+    return `<span class="worker-pill ${cls}">${esc(name)} ${esc(hb)}${active}</span>`;
   }).join('');
 
   const nextScanDisplay =
@@ -852,8 +948,8 @@ async function loadQueue() {
           actions = `<button class="btn btn-sm btn-red" onclick="deleteVideo('${q.video_id}')">del</button>`;
         }
 
-        return `<tr class="${isDeleted ? 'row-deleted' : ''}">
-          <td><span class="status status-${q.status}"><span class="status-dot"></span></span></td>
+        return `<tr class="${isDeleted ? 'row-deleted' : ''}" data-video-id="${esc(q.video_id)}">
+          <td class="status-cell" data-tip="${esc(statusTooltip(q))}"><span class="status status-${q.status}"><span class="status-dot"></span></span><span class="ctip"><span class="ctip-text">${esc(statusTooltip(q))}</span><span class="ctip-hint">click to copy</span></span></td>
           <td class="td-title">${esc(q.title)}</td>
           <td class="td-channel">${esc(q.channel)}</td>
           <td class="td-date">${q.date}</td>
@@ -878,7 +974,7 @@ async function loadQueueEvents() {
       const transition = (e.from_status || '?') + ' -> ' + (e.to_status || '?');
       return `<div class="event-item">
         <div class="event-top">
-          <div><span class="status status-${e.to_status || 'pending'}"><span class="status-dot"></span></span> ${esc(e.video_id)} <span class="event-meta">(${esc(transition)})</span></div>
+          <div><span class="status status-${e.to_status || 'pending'} status-static"><span class="status-dot"></span></span> ${esc(e.title || e.video_id)} <span class="event-meta">(${esc(transition)})</span></div>
           <div class="event-meta">${esc(e.at || '')}</div>
         </div>
         <div class="event-msg">${esc((e.actor || 'system') + (e.message ? ': ' + e.message : ''))}</div>
@@ -926,6 +1022,7 @@ async function loadSettings() {
     $('#setRetention').value = s.retention_days;
     $('#setSponsorblock').checked = s.sponsorblock;
     $('#setGemini').value = s.gemini_api_key;
+    $('#setBaseUrl').value = s.base_url || '';
     $('#setTemplate').value = s.output_template;
   } catch (e) {
     toast('Failed to load settings', 'error');
@@ -941,6 +1038,7 @@ async function saveSettings() {
       retention_days: parseInt($('#setRetention').value),
       sponsorblock: $('#setSponsorblock').checked,
       gemini_api_key: $('#setGemini').value,
+      base_url: $('#setBaseUrl').value,
       output_template: $('#setTemplate').value,
     };
     await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
@@ -971,6 +1069,57 @@ setInterval(loadSystemStatus, 10000);
 setInterval(tickScanCountdown, 1000);
 setInterval(loadQueue, 15000);
 setInterval(loadQueueEvents, 15000);
+
+// Auto-populate settings that can be detected from the browser environment.
+// Add new entries here: if the setting is falsy in DB, the value is written once.
+async function initSettings() {
+  try {
+    const s = await api('/settings');
+    const updates = {};
+    if (!s.base_url) updates.base_url = window.location.origin;
+    if (!s.cleanup_timezone) updates.cleanup_timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // add more here, e.g.: if (!s.foo) updates.foo = detectFoo();
+    if (Object.keys(updates).length) {
+      await api('/settings', { method: 'PUT', body: JSON.stringify(updates) });
+    }
+  } catch (_) {}
+}
+initSettings();
+
+// Hash-based deep linking (e.g. /#queue/VIDEO_ID from NFO files)
+window.addEventListener('hashchange', () => applyHash(location.hash));
+setTimeout(() => applyHash(location.hash), 150);
+
+// Status cell click-to-copy
+function copyToClipboard(text) {
+  if (navigator.clipboard) return navigator.clipboard.writeText(text);
+  // Fallback for non-secure (HTTP) contexts
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(ta);
+  return ok ? Promise.resolve() : Promise.reject();
+}
+
+document.addEventListener('click', function(e) {
+  const cell = e.target.closest('.status-cell');
+  if (!cell) return;
+  const textEl = cell.querySelector('.ctip-text');
+  if (!textEl) return;
+  const text = textEl.textContent.trim();
+  if (!text) return;
+  copyToClipboard(text).then(() => {
+    cell.classList.add('ctip-copied');
+    textEl.textContent = 'Copied!';
+    setTimeout(() => {
+      cell.classList.remove('ctip-copied');
+      textEl.textContent = text;
+    }, 1500);
+  }).catch(() => toast('Copy failed', 'error'));
+});
 </script>
 </body>
 </html>

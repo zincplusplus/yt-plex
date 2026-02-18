@@ -2,6 +2,18 @@
 
 This file should be updated in every commit that changes behavior, operations, or user-visible output.
 
+## 2026-02-18 — Frontend: status tooltips, deep linking, wider layout
+
+- Status dots now show a tooltip on hover with context-aware detail: pending items show when they were queued; downloading/processing show start time and attempt number; done shows completion time; failed shows the error message and attempt count; deleted shows when and why.
+- Clicking a tooltip copies the text to clipboard. The tooltip briefly flashes "Copied!" then restores.
+- Status dots in the Recent Events log no longer pulse — events are historical, so a `downloading` dot from an old transition shouldn't keep blinking.
+- Deleted items now show a gray dot instead of no dot.
+- Recent Events now shows the video title instead of the raw video ID.
+- Hash-based deep linking: opening `/#queue/VIDEO_ID` (as written in NFO `<website>` links) opens the Queue section and scrolls to that row, briefly highlighting it in blue.
+- Worker pills now show human-readable age ("3m ago", "yesterday") instead of raw seconds.
+- Layout widened to 1140px (was 860px) to give the queue table more room.
+- `server url` field added to the Settings section for `base_url`.
+
 ## 2026-02-18 — Backend: deletion reasons, richer queue data, NFO deep links
 
 - Every deletion now records why it happened. Cleanup stores "Removed by global/source retention policy: older than N days" or "File missing — removed by Plex or an external process". Manual deletes store "Manually deleted". Source-removal deletes store "Source removed". The reason shows up in the queue's deleted-item tooltip.

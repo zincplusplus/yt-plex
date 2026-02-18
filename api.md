@@ -262,11 +262,16 @@ Returns the parsed queue (from `data/queue.db`).
     "channel": "Channel Name",
     "title": "Video Title",
     "video_id": "dQw4w9WgXcQ",
-    "raw": "- [ ] 2025-06-15 | Channel Name | Video Title | dQw4w9WgXcQ"
+    "created_at": "2025-06-15T12:00:00Z",
+    "updated_at": "2025-06-15T12:00:00Z",
+    "last_error": null,
+    "attempt_download": 0,
+    "attempt_process": 0
   }
 ]
 ```
 Status is one of: `pending`, `downloading`, `processing`, `done`, `download_failed`, `process_failed`, `deleted`.
+`last_error` contains the failure reason when status is `download_failed` or `process_failed`.
 
 ### `GET /api/queue/events?limit=100`
 Returns recent queue transition events (newest first).
@@ -280,6 +285,7 @@ Validation rules:
   {
     "id": 123,
     "video_id": "dQw4w9WgXcQ",
+    "title": "Video Title",
     "at": "2026-02-16T21:00:00Z",
     "actor": "downloader",
     "from_status": "pending",
@@ -288,6 +294,7 @@ Validation rules:
   }
 ]
 ```
+`title` is joined from the queue item; may be `null` if the queue entry was purged.
 
 ### `GET /api/queue/dead-letter?limit=200&status=download_failed&channel=Name&q=term`
 Returns failed items for operator triage (`download_failed` and `process_failed`).
@@ -427,7 +434,9 @@ Returns current effective values for all settings (settings.json > env vars > de
   "preferred_resolution": "1080p",
   "output_template": "%(channel)s/%(id)s/%(title)s.%(ext)s",
   "retention_days": 7,
-  "gemini_api_key": ""
+  "gemini_api_key": "",
+  "base_url": "http://192.168.1.100:8080",
+  "cleanup_timezone": "Europe/Amsterdam"
 }
 ```
 
@@ -458,3 +467,5 @@ Validation rules:
 - `output_template`: non-empty, max 500 chars
 - `retention_days`: `1..3650`
 - `gemini_api_key`: max 512 chars
+- `base_url`: max 500 chars, stripped of trailing slash when used in NFO files; auto-detected from browser origin on first visit
+- `cleanup_timezone`: must be a valid IANA timezone identifier (e.g. `"Europe/Amsterdam"`, `"America/New_York"`); auto-detected from browser on first visit
